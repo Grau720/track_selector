@@ -1,9 +1,9 @@
-// index.js COMPLETO
 const express = require('express');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
 const SpotifyWebApi = require('spotify-web-api-node');
 const path = require('path');
+const db = require('./db');
 
 const app = express();
 app.use(cookieParser());
@@ -13,7 +13,6 @@ app.use(express.static('public'));
 let currentAccessToken = null;
 let currentUserId = null;
 let currentRefreshToken = null;
-// let currentClientToken = null; // ❌ ELIMINADA: Usaremos un Client Token temporal
 
 const CONFIG_PATH = path.join(__dirname, 'configs.json');
 const HISTORY_PATH = path.join(__dirname, 'history.json');
@@ -74,10 +73,9 @@ function saveHistory(entry) {
 // --- Configuración de Spotify API y Cookies ---
 // ----------------------------------------
 
-// 🛑 ¡IMPORTANTE!: REVISA Y ACTUALIZA ESTAS VARIABLES CON TUS CREDENCIALES REALES
 const clientId = '61f8b91c159a4e1590d083bf95049363';
 const clientSecret = '71c6fa065dac418a984f8e5c19f01596';
-const redirectUri = 'http://192.168.8.128:8888/callback';
+const redirectUri = 'http://localhost:8888/callback';
 
 const scopes = [
   'playlist-modify-public',
@@ -357,6 +355,322 @@ app.get('/api/search', (req, res) => apiWrapper(req, res, async () => {
     res.json({ artists: simpleArtists });
 }));
 
+// ----------------------------------------
+// --- Configuración del algoritmo ---
+// ----------------------------------------
+const RECOMMENDATION_CONFIG = {
+  topArtistsToUse: 10,           // Cuántos de tus artistas usar como semilla
+  minPopularity: 30,             // Filtro de popularidad
+  minFollowers: 10000,           // Filtro de seguidores
+  genreWeight: 40,               // Peso de géneros coincidentes en el score
+  popularityWeight: 0.5,         // Peso de popularidad general
+  collaborationWeight: 10        // Peso de frecuencia de colaboración
+};
+
+// ----------------------------------------
+// --- Función auxiliar: Reintentos con rate limits ---
+// ----------------------------------------
+async function retryApiCall(apiCall, maxRetries = 2, baseDelayMs = 1000) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await apiCall();
+        } catch (err) {
+            // Si es 429 (rate limit), respetar el Retry-After header
+            if (err.statusCode === 429) {
+                const retryAfter = parseInt(err.headers?.['retry-after'] || '5', 10);
+                console.warn(`⏳ Rate limit alcanzado. Esperando ${retryAfter}s...`);
+                await delay(retryAfter * 1000);
+                continue;
+            }
+            
+            // Si es 404 y no es el último intento, reintentar
+            if (err.statusCode === 404 && attempt < maxRetries) {
+                await delay(baseDelayMs * attempt);
+                continue;
+            }
+            
+            throw err;
+        }
+    }
+}
+
+// ----------------------------------------
+// --- Endpoint: Artistas Recomendados (ESTRATEGIA: TOP TRACKS) ---
+// ----------------------------------------
+app.get('/api/recommended-artists', (req, res) => apiWrapper(req, res, async () => {
+    const userId = req.cookies?.spotify_user_id || currentUserId;
+    if (!userId) {
+        return res.status(401).json({ error: 'No hay ID de usuario disponible' });
+    }
+
+    const config = getUserConfig(userId);
+    const seed_genres = config.generos || [];
+
+    if (seed_genres.length === 0) {
+        return res.json({ artists: [] });
+    }
+
+    try {
+        const excludedIds = new Set(config.excludedArtists || []);
+        const myArtistIds = new Set();
+        let after = null;
+
+        // ============================================
+        // PASO 1: Obtener TUS artistas seguidos
+        // ============================================
+        console.log('📥 Obteniendo artistas seguidos...');
+        
+        while (true) {
+            const opts = { limit: 50 };
+            if (after) opts.after = after;
+            
+            const data = await retryApiCall(() => spotifyApi.getFollowedArtists(opts));
+            const artists = data.body.artists.items;
+
+            artists.forEach(artist => {
+                if (artist.genres.some(g => seed_genres.includes(g))) {
+                    myArtistIds.add(artist.id);
+                    excludedIds.add(artist.id);
+                }
+            });
+
+            if (!data.body.artists.next) break;
+            after = artists[artists.length - 1].id;
+            await delay(200);
+        }
+
+        // Añadir favoritos
+        if (config.favoriteArtists) {
+            config.favoriteArtists.forEach(fav => {
+                myArtistIds.add(fav.id);
+                excludedIds.add(fav.id);
+            });
+        }
+
+        const myArtistsArray = Array.from(myArtistIds);
+        
+        if (myArtistsArray.length === 0) {
+            return res.json({ 
+                artists: [], 
+                message: 'Necesitas seguir artistas primero' 
+            });
+        }
+
+        console.log(`🎯 Base: ${myArtistsArray.length} artistas propios`);
+
+        // ============================================
+        // PASO 2: Validar y rankear tus artistas
+        // ============================================
+        console.log('🔍 Validando y rankeando artistas...');
+        
+        const validArtistScores = [];
+        
+        for (let i = 0; i < myArtistsArray.length; i += 50) {
+            const batch = myArtistsArray.slice(i, i + 50);
+            
+            try {
+                const artistsData = await retryApiCall(() => spotifyApi.getArtists(batch));
+                
+                artistsData.body.artists.forEach(artist => {
+                    if (artist && artist.id) {
+                        const matchingGenres = artist.genres.filter(g => seed_genres.includes(g)).length;
+                        validArtistScores.push({
+                            id: artist.id,
+                            name: artist.name,
+                            score: matchingGenres,
+                            popularity: artist.popularity
+                        });
+                    }
+                });
+                
+                if (i + 50 < myArtistsArray.length) {
+                    await delay(300);
+                }
+            } catch (err) {
+                console.warn('⚠️ Error obteniendo artistas:', err.message);
+            }
+        }
+
+        if (validArtistScores.length === 0) {
+            return res.json({ artists: [], message: 'No hay artistas válidos' });
+        }
+
+        // Ordenar por relevancia
+        validArtistScores.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return b.popularity - a.popularity;
+        });
+
+        const topSeedArtists = validArtistScores.slice(0, RECOMMENDATION_CONFIG.topArtistsToUse);
+        console.log(`🌟 Usando top ${topSeedArtists.length} artistas como semilla`);
+
+        // ============================================
+        // PASO 3: Obtener Top Tracks y extraer colaboradores
+        // ============================================
+        console.log('🎵 Obteniendo top tracks y colaboradores...');
+        
+        const collaboratorData = new Map(); // id -> { count, artist }
+        let tracksProcessed = 0;
+
+        for (const seedArtist of topSeedArtists) {
+            try {
+                // 🔥 USAR 'from_token' para el mercado del usuario
+                const topTracks = await retryApiCall(
+                    () => spotifyApi.getArtistTopTracks(seedArtist.id, 'from_token')
+                );
+                
+                // Procesar cada track
+                topTracks.body.tracks.forEach(track => {
+                    tracksProcessed++;
+                    
+                    // Extraer TODOS los artistas de la canción
+                    track.artists.forEach(artist => {
+                        // Excluir si es el artista principal o ya lo sigues
+                        if (artist.id === seedArtist.id || excludedIds.has(artist.id)) {
+                            return;
+                        }
+                        
+                        // Contar colaboraciones
+                        if (collaboratorData.has(artist.id)) {
+                            collaboratorData.get(artist.id).count++;
+                        } else {
+                            collaboratorData.set(artist.id, {
+                                id: artist.id,
+                                name: artist.name,
+                                count: 1 // Primera vez que aparece
+                            });
+                        }
+                    });
+                });
+                
+                await delay(400); // Pausa entre artistas
+                
+            } catch (err) {
+                console.warn(`⚠️ Error obteniendo tracks de ${seedArtist.name}:`, err.statusCode);
+            }
+        }
+
+        console.log(`✅ ${tracksProcessed} tracks procesados`);
+        console.log(`✅ ${collaboratorData.size} colaboradores únicos encontrados`);
+
+        if (collaboratorData.size === 0) {
+            return res.json({ 
+                artists: [], 
+                message: 'No se encontraron colaboradores en las top tracks' 
+            });
+        }
+
+        // ============================================
+        // PASO 4: Obtener detalles completos de los colaboradores
+        // ============================================
+        console.log('📊 Obteniendo detalles de colaboradores...');
+        
+        const collaboratorIds = Array.from(collaboratorData.keys());
+        const collaboratorDetails = [];
+
+        for (let i = 0; i < collaboratorIds.length; i += 50) {
+            const batch = collaboratorIds.slice(i, i + 50);
+            
+            try {
+                const artistsData = await retryApiCall(() => spotifyApi.getArtists(batch));
+                
+                artistsData.body.artists.forEach(artist => {
+                    if (!artist || !artist.id) return;
+                    
+                    // FILTROS
+                    if (artist.popularity < RECOMMENDATION_CONFIG.minPopularity) return;
+                    if (artist.followers.total < RECOMMENDATION_CONFIG.minFollowers) return;
+                    
+                    const matchingGenres = artist.genres.filter(g => seed_genres.includes(g)).length;
+                    
+                    // Al menos debe tener 1 género coincidente
+                    if (matchingGenres === 0) return;
+                    
+                    const collabInfo = collaboratorData.get(artist.id);
+                    
+                    collaboratorDetails.push({
+                        id: artist.id,
+                        name: artist.name,
+                        image: artist.images.length > 0 
+                            ? artist.images[artist.images.length - 1].url
+                            : null,
+                        genres: artist.genres,
+                        followers: artist.followers.total,
+                        popularity: artist.popularity,
+                        matchingGenres: matchingGenres,
+                        collaborations: collabInfo.count
+                    });
+                });
+                
+                if (i + 50 < collaboratorIds.length) {
+                    await delay(300);
+                }
+            } catch (err) {
+                console.warn('⚠️ Error obteniendo detalles de colaboradores:', err.message);
+            }
+        }
+
+        console.log(`✅ ${collaboratorDetails.length} colaboradores válidos tras filtros`);
+
+        if (collaboratorDetails.length === 0) {
+            return res.json({ 
+                artists: [], 
+                message: 'No se encontraron colaboradores que cumplan los filtros' 
+            });
+        }
+
+        // ============================================
+        // PASO 5: Calcular Popularity Index y ordenar
+        // ============================================
+        console.log('🎯 Calculando Popularity Index...');
+        
+        collaboratorDetails.forEach(artist => {
+            artist.popularityIndex = 
+                (artist.matchingGenres * RECOMMENDATION_CONFIG.genreWeight) +
+                (artist.popularity * RECOMMENDATION_CONFIG.popularityWeight) +
+                (artist.collaborations * RECOMMENDATION_CONFIG.collaborationWeight);
+        });
+
+        // Ordenar por Popularity Index (descendente)
+        collaboratorDetails.sort((a, b) => b.popularityIndex - a.popularityIndex);
+
+        // Limpiar datos internos antes de enviar
+        const finalArtists = collaboratorDetails.slice(0, 50).map(artist => ({
+            id: artist.id,
+            name: artist.name,
+            image: artist.image,
+            genres: artist.genres.slice(0, 3),
+            followers: artist.followers,
+            popularity: artist.popularity,
+            collaborations: artist.collaborations,
+            popularityIndex: Math.round(artist.popularityIndex)
+        }));
+
+        console.log(`🎉 Enviando ${finalArtists.length} artistas recomendados`);
+        console.log(`📈 Top 3 por Popularity Index:`);
+        finalArtists.slice(0, 3).forEach((a, i) => {
+            console.log(`   ${i+1}. ${a.name} - Index: ${a.popularityIndex} (${a.collaborations} colabs)`);
+        });
+
+        return res.json({ 
+            artists: finalArtists,
+            total: finalArtists.length,
+            stats: {
+                tracksProcessed: tracksProcessed,
+                collaboratorsFound: collaboratorData.size,
+                afterFilters: collaboratorDetails.length
+            },
+            config: RECOMMENDATION_CONFIG
+        });
+
+    } catch (error) {
+        console.error('❌ Error general:', error.message);
+        return res.status(500).json({ 
+            artists: [], 
+            error: error.message
+        });
+    }
+}));
 
 // ----------------------------------------
 // --- Endpoints de la API de Spotify ---
@@ -454,7 +768,7 @@ app.post('/vaciar-playlist', (req, res) => apiWrapper(req, res, async () => {
 }));
 
 // ----------------------------------------
-// --- Endpoint PRINCIPAL: /filtrar-y-anadir ---
+// --- Endpoint PRINCIPAL: /filtrar-y-anadir (OPTIMIZADO) ---
 // ----------------------------------------
 
 app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
@@ -463,7 +777,8 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
 
     const addedTracksDetails = [];
     let existingTracksCount = 0;
-    
+    const errors = []; // 💡 NUEVO: Array para errores descriptivos
+
     // 1. Obtener artistas seguidos y favoritos que coincidan con los géneros
     const artistIds = new Set(); 
     const userConfig = getUserConfig(req.cookies?.spotify_user_id || currentUserId);
@@ -493,9 +808,9 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
         });
     }
 
+    // Convertimos el Set a Array para iterar en el Paso 3
     const uniqueArtistIds = Array.from(artistIds);
 
-    
     // 2. Obtener canciones actuales de la playlist para evitar duplicados
     const existingTracks = new Set();
     let offset = 0;
@@ -511,45 +826,86 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
     }
     existingTracksCount = existingTracks.size;
     
+    // 💡 CAMBIO: Límite de 90 días
+    const thisWeek = Date.now() - 90 * 24 * 3600 * 1000; 
     const trackUris = new Set();
-    const thisWeek = Date.now() - 7 * 24 * 3600 * 1000;
-    
+    const tracksToDetail = []; // 💡 NUEVO: Array para IDs de tracks que necesitan detalles
+
     // 3. Buscar lanzamientos recientes de los artistas seleccionados
     for (const id of uniqueArtistIds) { 
+      // Buscamos el nombre del artista para el manejo de errores
+      const artist = userConfig.favoriteArtists.find(a => a.id === id) || { name: `ID: ${id}` };
+
       try {
-        const releases = await spotifyApi.getArtistAlbums(id, { limit: 5, include_groups: 'single,album' });
+        // 💡 CAMBIO: Límite de 50 lanzamientos por artista
+        const releases = await spotifyApi.getArtistAlbums(id, { limit: 50, include_groups: 'single,album' });
+        
         for (const album of releases.body.items) {
           const date = new Date(album.release_date);
-          if (date.getTime() >= thisWeek) {
+          
+          if (date.getTime() >= thisWeek) { // Filtro temporal de 90 días
             
             const tracks = await spotifyApi.getAlbumTracks(album.id);
             
             for (const t of tracks.body.items) {
               if (t.uri && !existingTracks.has(t.uri)) {
                 
-                const fullTrack = await spotifyApi.getTrack(t.id); 
-                const isrc = fullTrack.body.external_ids?.isrc || null;
-                const trackArtists = t.artists.map(a => a.name).join(', ');
-                
-                const externalLinks = findExternalLinks(t.name, trackArtists, isrc);
-
-                trackUris.add(t.uri);
-                addedTracksDetails.push({
-                    title: t.name,
-                    artist: trackArtists,
-                    platform: 'Spotify (Nuevo Lanzamiento)',
-                    uri: t.uri,
-                    externalLinks: externalLinks 
-                });
+                // 💡 OPTIMIZACIÓN: Solo guardamos el ID para obtener detalles después
+                tracksToDetail.push(t.id);
+                trackUris.add(t.uri); 
               }
             }
           }
         }
       } catch (e) {
-        console.warn(`Error procesando artista ${id}: ${e.message}`);
+        // 💡 NUEVO: Registro de error descriptivo
+        errors.push({
+            artistId: id,
+            artistName: artist.name,
+            message: e.message,
+            statusCode: e.statusCode || 500
+        });
+        console.warn(`Error procesando artista ${artist.name} (${id}): ${e.message}`);
       }
       await delay(200); 
     }
+    
+    // -----------------------------------------------------
+    // 💡 OPTIMIZACIÓN: Procesar los detalles de las canciones en lote (50 en 50)
+    // -----------------------------------------------------
+    const detailBatchSize = 50;
+    const allTrackIds = Array.from(tracksToDetail);
+    
+    for (let i = 0; i < allTrackIds.length; i += detailBatchSize) {
+        const batchIds = allTrackIds.slice(i, i + detailBatchSize);
+        
+        try {
+            // 🚨 Única llamada para 50 tracks
+            const detailData = await spotifyApi.getTracks(batchIds); 
+            
+            detailData.body.tracks.forEach(fullTrack => {
+                if (fullTrack && fullTrack.uri) {
+                    const isrc = fullTrack.external_ids?.isrc || null;
+                    const trackArtists = fullTrack.artists.map(a => a.name).join(', ');
+                    
+                    const externalLinks = findExternalLinks(fullTrack.name, trackArtists, isrc);
+
+                    // Añadir a los detalles finales
+                    addedTracksDetails.push({
+                        title: fullTrack.name,
+                        artist: trackArtists,
+                        platform: 'Spotify (Nuevo Lanzamiento)',
+                        uri: fullTrack.uri,
+                        externalLinks: externalLinks 
+                    });
+                }
+            });
+            await delay(100); 
+        } catch (e) {
+             console.error('❌ Error obteniendo detalles de tracks en lote:', e.message);
+        }
+    }
+    // -----------------------------------------------------
     
     // 4. Añadir canciones a la playlist de Spotify
     const batchSize = 100;
@@ -583,9 +939,11 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
         newTracks: addedTracksDetails
     });
     
+    // 💡 NUEVO: Devolver los errores
     res.json({ 
       success: true, 
-      message: `✅ Añadidas ${addedCount} canciones nuevas (${existingTracksCount} ya existían).` 
+      message: `✅ Añadidas ${addedCount} canciones nuevas (${existingTracksCount} ya existían).`,
+      errors: errors 
     });
 }));
 
@@ -593,6 +951,7 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
 // ----------------------------------------
 // --- Endpoints de Artistas Filtrados/Excluidos ---
 // ----------------------------------------
+// ... (El código de /artistas-filtrados y /excluir-artista no ha sido modificado, se mantiene igual)
 
 app.post('/artistas-filtrados', (req, res) => apiWrapper(req, res, async () => {
     const { generos } = req.body;

@@ -15,17 +15,12 @@ let userId = '';
 // --- FUNCIONES DE UTILIDAD ---
 // ----------------------------------------
 
-/**
- * Función robusta para leer cookies desde el frontend.
- * Previene el error 'acc is undefined'.
- */
 function getCookie(name) {
     const cookieString = document.cookie;
     if (!cookieString) return null;
 
     const cookies = cookieString.split('; ').reduce((acc, current) => {
         const parts = current.split('=');
-        // Aseguramos que haya al menos clave=valor
         if (parts.length === 2) {
             acc[parts[0]] = decodeURIComponent(parts[1]); 
         }
@@ -37,42 +32,45 @@ function getCookie(name) {
 
 function setLoading(isLoading, message = 'Cargando...') {
     const loadingEl = document.getElementById('loading');
+    const loadingText = document.getElementById('loading-text');
     if (isLoading) {
-      loadingEl.textContent = message;
-      loadingEl.style.display = 'flex';
+      loadingText.textContent = message;
+      loadingEl.classList.remove('hidden');
     } else {
-      loadingEl.style.display = 'none';
+      loadingEl.classList.add('hidden');
     }
 }
 
 function showToast(message, type = 'success') {
-    const container = document.getElementById('toast-container') || document.body;
+    const container = document.getElementById('toast-container');
     const toast = document.createElement('div');
-    toast.className = `message-toast ${type}`;
+    toast.className = `toast ${type}`;
+    
+    const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : '⚠';
     
     if (message.includes('vuelve a iniciar sesión')) {
         toast.innerHTML = `
-            <strong>❌ Sesión Expirada</strong><br>${message}<br>
-            <button class="btn" style="background: #e22134; color: white; margin-top: 5px;" onclick="window.location.href='/login'">
-                Iniciar Sesión
-            </button>
+            <span style="font-size: 1.5rem;">${icon}</span>
+            <div>
+                <strong>Sesión Expirada</strong><br>
+                <small>${message}</small>
+            </div>
         `;
     } else {
-        toast.textContent = message;
+        toast.innerHTML = `
+            <span style="font-size: 1.5rem;">${icon}</span>
+            <div>${message}</div>
+        `;
     }
   
     container.appendChild(toast);
     
     setTimeout(() => {
-      toast.classList.add('show');
-    }, 10);
-    
-    setTimeout(() => {
-      toast.classList.remove('show');
+      toast.style.animation = 'slideOutRight 0.3s';
       setTimeout(() => {
         toast.remove();
       }, 300);
-    }, 7000); 
+    }, 5000); 
 }
 
 // ----------------------------------------
@@ -83,7 +81,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     setLoading(true, 'Cargando configuración...');
   
     try {
-      // 1. Cargar configuración del usuario
+      // 1. Solo cargar configuración básica
       const cfgRes = await fetch('/config');
       if (!cfgRes.ok) {
           if (cfgRes.status === 401) {
@@ -96,41 +94,32 @@ document.addEventListener('DOMContentLoaded', async () => {
       const loadedConfig = await cfgRes.json();
       config = { ...config, ...loadedConfig }; 
 
-      // Aseguramos que las propiedades existen
       if (!config.generos) config.generos = [];
       if (!config.excludedArtists) config.excludedArtists = [];
       if (!config.favoriteArtists) config.favoriteArtists = [];
       
-      // Obtener ID de usuario (LEECTURA SEGURA)
+      // 2. Obtener usuario
       userId = getCookie('spotify_user_id') || 'No disponible';
       document.getElementById('spotify-user-id').textContent = userId;
       
-      // 2. Cargar todas las playlists 
-      await loadPlaylists(); // Usa la nueva función
-  
-      // 3. Cargar todos los géneros disponibles
-      setLoading(true, 'Cargando géneros...');
+      // 3. Cargar géneros (ligero)
       const genresRes = await fetch('/generos');
       if (!genresRes.ok) throw new Error('No se pudo cargar géneros');
       allGenres = await genresRes.json();
       
+      // 4. Solo renderizar lo que ya tenemos guardado
       renderSelectedGenres();
       renderAllGenresList();
       
-      // 🛑 NUEVO: Cargar lista de artistas favoritos internos
-      await loadFavoriteArtists(); 
+      // 5. Cargar playlists en segundo plano (no bloqueante)
+      loadPlaylists().catch(err => console.error('Error cargando playlists:', err));
       
-      // 4. Obtener artistas filtrados
-      if (config.generos.length > 0 || config.favoriteArtists.length > 0) {
-        await updateFilteredArtists();
-      } else {
-        renderArtistList();
-      }
+      // 6. Cargar favoritos (ligero) también en segundo plano
+      loadFavoriteArtists().catch(err => console.error('Error cargando favoritos:', err));
       
-      // 5. Cargar historial
-      await loadAndRenderHistory();
-  
-  
+      // 7. NO cargar recomendados ni artistas filtrados automáticamente
+      // El usuario debe hacer click en las pestañas o botón refrescar
+      
     } catch (err) {
       console.error('Error cargando:', err);
       showToast(`Error al cargar: ${err.message}`, 'error');
@@ -158,37 +147,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         searchTimeout = setTimeout(() => searchArtist(e.target.value), 500);
     });
     
-    document.querySelectorAll('.tab-button').forEach(button => {
-      button.addEventListener('click', () => {
-        openTab(button.dataset.tab);
-      });
-    });
-    
-    // Asignar listeners a los botones principales
+    // NUEVO: Solo cargar recomendados cuando el usuario haga click
+    document.getElementById('refresh-recommended-btn').addEventListener('click', loadAndRenderRecommendedArtists);
+
     document.getElementById('run-filter-btn').addEventListener('click', filtrarYAnadir);
     document.getElementById('empty-playlist-btn').addEventListener('click', vaciarPlaylist);
 });
-  
-// Función para cambiar de pestaña
-function openTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-button').forEach(button => {
-        button.classList.remove('active');
-    });
-
-    document.getElementById(tabId).classList.add('active');
-    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-    
-    if (tabId === 'monitor-tab') {
-        loadAndRenderHistory();
-    }
-    if (tabId === 'artists-tab') {
-        updateFilteredArtists();
-    }
-}
-
 
 // ----------------------------------------
 // --- FUNCIONES DE RENDERIZADO ---
@@ -198,23 +162,24 @@ function renderSelectedGenres() {
     const cont = document.getElementById('selected-genres');
     cont.innerHTML = '';
     if (!config.generos || config.generos.length === 0) {
-      cont.innerHTML = '<div class="empty-message">No has seleccionado ningún género.</div>';
+      cont.innerHTML = '<div class="empty-state"><div>No hay géneros seleccionados</div></div>';
       return;
     }
     
     config.generos.forEach(g => {
       const el = document.createElement('div');
-      el.className = 'genre';
+      el.className = 'chip';
       
       const text = document.createElement('span');
       text.textContent = g;
       
       const removeBtn = document.createElement('button');
       removeBtn.textContent = '×';
-      removeBtn.className = 'remove-btn';
+      removeBtn.className = 'chip-remove';
       removeBtn.onclick = () => {
         config.generos = config.generos.filter(gen => gen !== g);
         saveConfigAndUpdateArtists();
+        loadAndRenderRecommendedArtists();
       };
       
       el.appendChild(text);
@@ -232,7 +197,7 @@ function renderAllGenresList(filter = '') {
       .filter(g => g.toLowerCase().includes(lowerFilter))
       .forEach(g => {
         const el = document.createElement('div');
-        el.className = 'genre-option';
+        el.className = 'dropdown-item';
         el.textContent = g;
         
         if (config.generos.includes(g)) {
@@ -248,6 +213,7 @@ function renderAllGenresList(filter = '') {
             el.classList.remove('selected');
           }
           saveConfigAndUpdateArtists();
+          loadAndRenderRecommendedArtists();
         };
         cont.appendChild(el);
       });
@@ -262,30 +228,30 @@ function renderArtistList() {
     );
     
     if (artistsToShow.length === 0) {
-       const li = document.createElement('li');
-       li.className = 'empty-message';
-       li.textContent = 'No se encontraron artistas para monitorizar (verifica géneros o artistas favoritos).';
-       ul.appendChild(li);
+       ul.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎵</div><div>No se encontraron artistas para monitorizar</div><small style="color: var(--text-secondary);">Verifica géneros o artistas favoritos</small></div>';
        return;
     }
   
     artistsToShow.forEach(a => {
-      const li = document.createElement('li');
+      const div = document.createElement('div');
+      div.className = 'artist-item';
       
       const artistName = document.createElement('span');
-      artistName.textContent = a.name + (a.isFavorite ? ' (Favorito App)' : '');
+      artistName.textContent = a.name + (a.isFavorite ? ' ⭐' : '');
   
       const removeBtn = document.createElement('button');
-      removeBtn.textContent = 'Excluir Artista';
-      removeBtn.className = 'remove-artist-btn'; 
+      removeBtn.textContent = 'Excluir';
+      removeBtn.className = 'btn btn-danger';
+      removeBtn.style.padding = '0.5rem 1rem';
+      removeBtn.style.fontSize = '0.875rem';
   
       removeBtn.onclick = async () => {
-        await excludeArtist(a, li);
+        await excludeArtist(a, div);
       };
       
-      li.appendChild(artistName);
-      li.appendChild(removeBtn);
-      ul.appendChild(li);
+      div.appendChild(artistName);
+      div.appendChild(removeBtn);
+      ul.appendChild(div);
     });
 }
   
@@ -297,13 +263,15 @@ function renderSelectedPlaylistDisplay() {
   
       if (selected) {
           display.classList.remove('hidden');
+          display.className = 'playlist-display';
+          
           if (selected.image) {
               const img = document.createElement('img');
               img.src = selected.image;
               display.appendChild(img);
           }
           const info = document.createElement('div');
-          info.innerHTML = `<strong>Playlist Seleccionada:</strong><br>${selected.name} (${selected.tracks} canciones)`;
+          info.innerHTML = `<strong>${selected.name}</strong><br><small style="color: var(--text-secondary);">${selected.tracks} canciones</small>`;
           display.appendChild(info);
       } else {
           display.classList.add('hidden');
@@ -319,16 +287,23 @@ function renderPlaylistResults(filter = '') {
       
       if (lowerFilter.length > 0) {
           playlistsToShow = allPlaylists.filter(p => p.name.toLowerCase().includes(lowerFilter));
+          resultsCont.classList.remove('hidden');
+      } else {
+          playlistsToShow = allPlaylists.slice(0, 5);
+          resultsCont.classList.remove('hidden');
       }
       
       if (playlistsToShow.length === 0) {
-          resultsCont.innerHTML = '<div class="empty-message">No se encontraron playlists.</div>';
+          resultsCont.innerHTML = '<div class="empty-state">No se encontraron playlists</div>';
           return;
       }
   
       playlistsToShow.forEach(p => {
           const div = document.createElement('div');
-          div.className = 'playlist-option';
+          div.className = 'dropdown-item';
+          div.style.display = 'flex';
+          div.style.alignItems = 'center';
+          div.style.gap = '0.75rem';
           
           if (p.id === config.playlistId) {
               div.classList.add('selected');
@@ -337,11 +312,15 @@ function renderPlaylistResults(filter = '') {
           if (p.image) {
               const img = document.createElement('img');
               img.src = p.image;
+              img.style.width = '40px';
+              img.style.height = '40px';
+              img.style.borderRadius = '4px';
+              img.style.objectFit = 'cover';
               div.appendChild(img);
           }
   
           const name = document.createElement('span');
-          name.textContent = `${p.name} (${p.tracks} canciones)`;
+          name.innerHTML = `${p.name}<br><small style="color: var(--text-secondary);">${p.tracks} canciones</small>`;
           div.appendChild(name);
           
           div.onclick = () => {
@@ -349,7 +328,7 @@ function renderPlaylistResults(filter = '') {
               saveConfig();
               renderPlaylistResults(filter); 
               renderSelectedPlaylistDisplay(); 
-              showToast(`Playlist "${p.name}" seleccionada.`, 'success');
+              showToast(`Playlist "${p.name}" seleccionada`, 'success');
           };
   
           resultsCont.appendChild(div);
@@ -357,7 +336,7 @@ function renderPlaylistResults(filter = '') {
 }
   
 // ----------------------------------------
-// --- FUNCIONES DE ARTISTAS FAVORITOS ---
+// --- FUNCIONES DE ARTISTAS FAVORITOS Y RECOMENDADOS ---
 // ----------------------------------------
 
 async function searchArtist(query) {
@@ -366,7 +345,7 @@ async function searchArtist(query) {
     
     if (query.length < 3) return;
 
-    resultsDiv.innerHTML = '<p style="margin: 10px 0;">Buscando...</p>';
+    resultsDiv.innerHTML = '<p style="margin: 10px 0; color: var(--text-secondary);">Buscando...</p>';
 
     try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
@@ -376,18 +355,20 @@ async function searchArtist(query) {
         resultsDiv.innerHTML = '';
 
         if (data.artists.length === 0) {
-            resultsDiv.innerHTML = '<p style="margin: 10px 0;">No se encontraron artistas.</p>';
+            resultsDiv.innerHTML = '<p style="margin: 10px 0; color: var(--text-secondary);">No se encontraron artistas.</p>';
             return;
         }
 
         data.artists.forEach(artist => {
             const button = document.createElement('button');
-            button.className = 'add-artist-btn';
+            button.className = 'btn btn-secondary';
+            button.style.marginRight = '0.5rem';
+            button.style.marginBottom = '0.5rem';
             button.textContent = `+ ${artist.name}`;
             button.disabled = config.favoriteArtists.some(a => a.id === artist.id);
             if (button.disabled) {
                 button.textContent = `✓ ${artist.name}`;
-                button.style.backgroundColor = '#1DB954';
+                button.className = 'btn btn-primary';
             }
             
             button.onclick = () => addArtistToFavorites(artist.id, artist.name);
@@ -395,7 +376,7 @@ async function searchArtist(query) {
         });
 
     } catch (error) {
-        resultsDiv.innerHTML = '<p class="error-text" style="margin: 10px 0; color: #f44336;">Error al buscar.</p>';
+        resultsDiv.innerHTML = '<p style="margin: 10px 0; color: var(--danger);">Error al buscar.</p>';
         console.error(error);
     }
 }
@@ -427,7 +408,9 @@ async function addArtistToFavorites(artistId, artistName) {
 
 async function loadFavoriteArtists() {
     const list = document.getElementById('favorite-artist-list');
-    list.innerHTML = '<li>Cargando...</li>';
+    list.innerHTML = '<div style="color: var(--text-secondary);">Cargando...</div>';
+    list.className = 'favorite-list';
+    
     try {
         const res = await fetch('/favorite-artists');
         if (!res.ok) throw new Error('No se pudo cargar la lista de favoritos');
@@ -437,20 +420,129 @@ async function loadFavoriteArtists() {
 
         list.innerHTML = '';
         if (artists.length === 0) {
-            list.innerHTML = '<li class="empty-message">Aún no tienes artistas favoritos internos.</li>';
+            list.innerHTML = '<div class="empty-state"><small style="color: var(--text-secondary);">Aún no tienes artistas favoritos</small></div>';
             return;
         }
 
         artists.forEach(artist => {
-            const li = document.createElement('li');
-            li.textContent = artist.name;
-            list.appendChild(li);
+            const chip = document.createElement('div');
+            chip.className = 'favorite-chip';
+            
+            const img = document.createElement('img');
+            img.src = artist.image || 'https://via.placeholder.com/24';
+            img.alt = artist.name;
+            
+            const name = document.createElement('span');
+            name.textContent = artist.name;
+            
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'favorite-chip-remove';
+            removeBtn.textContent = '×';
+            removeBtn.onclick = async () => {
+                chip.remove();
+            };
+            
+            chip.appendChild(img);
+            chip.appendChild(name);
+            chip.appendChild(removeBtn);
+            list.appendChild(chip);
         });
 
     } catch (error) {
-        list.innerHTML = '<li class="empty-message" style="color:#f44336;">Error al cargar la lista.</li>';
+        list.innerHTML = '<div style="color: var(--danger);">Error al cargar la lista</div>';
         console.error(error);
     }
+}
+
+async function loadAndRenderRecommendedArtists() {
+    const cont = document.getElementById('recommended-artists-list');
+    const refreshBtn = document.getElementById('refresh-recommended-btn');
+    
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '⏳';
+    
+    cont.innerHTML = `
+        <div style="grid-column: 1 / -1; text-align: center; padding: 2rem; color: var(--text-secondary);">
+            <div class="spinner" style="margin: 0 auto 1rem;"></div>
+            <div>Analizando tus artistas...</div>
+        </div>
+    `;
+    
+    if (config.generos.length === 0) {
+        cont.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎵</div><div>Selecciona géneros para obtener recomendaciones</div></div>';
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄';
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/recommended-artists');
+        if (!res.ok) throw new Error('No se pudo cargar las recomendaciones');
+        const data = await res.json();
+        
+        const currentFavoriteIds = config.favoriteArtists.map(a => a.id);
+        const artists = data.artists.filter(a => !currentFavoriteIds.includes(a.id));
+
+        renderRecommendedArtists(artists);
+
+    } catch (error) {
+        cont.innerHTML = '<div class="empty-state"><div style="color: var(--danger);">Error al cargar recomendaciones</div><small>Intenta de nuevo</small></div>';
+        console.error('Error cargando recomendaciones:', error);
+    } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = '🔄';
+    }
+}
+
+function renderRecommendedArtists(artists) {
+    const cont = document.getElementById('recommended-artists-list');
+    cont.innerHTML = '';
+
+    if (artists.length === 0) {
+        cont.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✨</div><div>No hay nuevas sugerencias</div></div>';
+        return;
+    }
+
+    artists.forEach(artist => {
+        const card = document.createElement('div');
+        card.className = 'artist-card';
+        card.dataset.artistId = artist.id;
+        
+        const img = document.createElement('img');
+        img.src = artist.image || 'https://via.placeholder.com/80';
+        img.alt = artist.name;
+        card.appendChild(img);
+        
+        const name = document.createElement('div');
+        name.className = 'artist-card-name';
+        name.textContent = artist.name;
+        card.appendChild(name);
+        
+        const genres = document.createElement('div');
+        genres.className = 'artist-card-genre';
+        genres.textContent = artist.genres.slice(0, 2).join(', ') || 'Sin géneros';
+        card.appendChild(genres);
+        
+        const addBtn = document.createElement('button');
+        addBtn.className = 'btn btn-primary';
+        addBtn.textContent = '+ Añadir';
+        addBtn.onclick = async (e) => {
+            e.stopPropagation();
+            addBtn.disabled = true;
+            addBtn.textContent = '✓ Añadido';
+            card.classList.add('added');
+            await addArtistToFavorites(artist.id, artist.name);
+            
+            setTimeout(() => {
+                card.style.opacity = '0';
+                card.style.transform = 'scale(0.8)';
+                setTimeout(() => card.remove(), 300);
+            }, 500);
+        };
+        card.appendChild(addBtn);
+
+        cont.appendChild(card);
+    });
 }
 
 // ----------------------------------------
@@ -459,7 +551,7 @@ async function loadFavoriteArtists() {
 
 async function loadAndRenderHistory() {
     const list = document.getElementById('history-list');
-    list.innerHTML = '<li class="empty-message">Cargando historial...</li>';
+    list.innerHTML = '<div class="empty-state">Cargando historial...</div>';
     
     try {
         const res = await fetch('/history');
@@ -469,93 +561,112 @@ async function loadAndRenderHistory() {
         list.innerHTML = '';
 
         if (history.length === 0) {
-            list.innerHTML = '<li class="empty-message">No hay ejecuciones registradas todavía.</li>';
+            list.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📊</div><div>No hay ejecuciones registradas</div></div>';
             return;
         }
 
         history.forEach(item => {
-            const li = document.createElement('li');
-            li.className = 'history-item';
+            const div = document.createElement('div');
+            div.className = 'history-item';
             
-            const date = new Date(item.timestamp).toLocaleString();
+            const date = new Date(item.timestamp).toLocaleString('es-ES', {
+                day: '2-digit',
+                month: '2-digit',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
             
-            li.innerHTML = `
+            div.innerHTML = `
                 <div class="history-header">
-                    <span>📅 ${date}</span>
-                    <span class="status-text">Playlist: ${item.playlistName}</span>
-                    <span style="color: ${item.addedCount > 0 ? '#1db954' : '#888'};">
-                        ${item.addedCount} Canciones añadidas
-                    </span>
+                    <span class="history-date">📅 ${date}</span>
+                    <div class="history-stats">
+                        <span class="stat-badge stat-success">${item.addedCount} añadidas</span>
+                        ${item.errors && item.errors.length > 0 ? `<span class="stat-badge stat-error">${item.errors.length} errores</span>` : ''}
+                    </div>
+                </div>
+                <div style="font-size: 0.875rem; color: var(--text-secondary); margin-top: 0.5rem;">
+                    <strong>${item.playlistName}</strong> · ${item.genresUsed.join(', ')}
                 </div>
                 <div class="history-details">
-                    <p>Géneros usados: ${item.genresUsed.join(', ')}</p>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Canción</th>
-                                <th>Artista</th>
-                                <th>Enlaces</th> 
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${item.newTracks.map(track => {
-                                let linksHtml = '';
-                                const links = track.externalLinks || {};
-                                
-                                // Enlace a Spotify (usando la URI para construir el enlace)
-                                if (track.uri) {
-                                    const spotifyId = track.uri.split(':').pop();
-                                    linksHtml += `<a href="https://open.spotify.com/track/${spotifyId}" target="_blank">Spotify</a>`;
-                                }
-                                
-                                if (links.youtubeMusic) {
-                                    linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.youtubeMusic}" target="_blank">YouTube Music</a>`;
-                                }
-                                if (links.appleMusic) {
-                                    linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.appleMusic}" target="_blank">Apple Music</a>`;
-                                }
-                                if (links.beatport) {
-                                    linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.beatport}" target="_blank">Beatport</a>`;
-                                }
+                    ${item.errors && item.errors.length > 0 ? `
+                        <p style="color: var(--danger); font-weight: 500; margin-bottom: 0.5rem;">⚠️ Errores de procesamiento:</p>
+                        <ul style="list-style: none; padding-left: 0; font-size: 0.875rem; margin-bottom: 1rem;">
+                            ${item.errors.map(e => `<li style="padding: 0.25rem 0;">• ${e.artistName}: ${e.message}</li>`).join('')}
+                        </ul>
+                    ` : ''}
+                    ${item.newTracks.length > 0 ? `
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Canción</th>
+                                    <th>Artista</th>
+                                    <th>Enlaces</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${item.newTracks.map(track => {
+                                    let linksHtml = '';
+                                    const links = track.externalLinks || {};
+                                    
+                                    if (track.uri) {
+                                        const spotifyId = track.uri.split(':').pop();
+                                        linksHtml += `<a href="https://open.spotify.com/track/${spotifyId}" target="_blank" style="color: var(--accent);">Spotify</a>`;
+                                    }
+                                    
+                                    if (links.youtubeMusic) {
+                                        linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.youtubeMusic}" target="_blank" style="color: var(--accent);">YouTube</a>`;
+                                    }
+                                    if (links.appleMusic) {
+                                        linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.appleMusic}" target="_blank" style="color: var(--accent);">Apple</a>`;
+                                    }
+                                    if (links.beatport) {
+                                        linksHtml += `${linksHtml ? ' | ' : ''}<a href="${links.beatport}" target="_blank" style="color: var(--accent);">Beatport</a>`;
+                                    }
 
-                                return `
-                                    <tr>
-                                        <td>${track.title}</td>
-                                        <td>${track.artist}</td>
-                                        <td>${linksHtml}</td> 
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
+                                    return `
+                                        <tr>
+                                            <td>${track.title}</td>
+                                            <td>${track.artist}</td>
+                                            <td>${linksHtml || '-'}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    ` : ''}
                 </div>
             `;
             
-            li.addEventListener('click', (e) => {
-                if (e.target.tagName === 'A' || e.target.tagName === 'BUTTON' || e.target.closest('table')) return;
+            div.addEventListener('click', (e) => {
+                if (e.target.tagName === 'A' || e.target.closest('table')) return;
                 
-                const details = li.querySelector('.history-details');
+                const details = div.querySelector('.history-details');
                 details.style.display = details.style.display === 'block' ? 'none' : 'block';
             });
 
-            list.appendChild(li);
+            list.appendChild(div);
         });
 
     } catch (err) {
         console.error('Error cargando historial:', err);
         showToast(`Error al cargar historial: ${err.message}`, 'error');
+        list.innerHTML = '<div class="empty-state" style="color: var(--danger);">Error al cargar el historial</div>';
     }
 }
-  
   
 // ----------------------------------------
 // --- FUNCIONES DE LÓGICA Y DATOS ---
 // ----------------------------------------
 
-/**
- * Función que encapsula la recarga de playlists.
- */
 async function loadPlaylists() {
+    // No mostrar loading si ya están cargadas
+    if (allPlaylists.length > 0) {
+        renderSelectedPlaylistDisplay(); 
+        renderPlaylistResults();
+        return;
+    }
+    
     setLoading(true, 'Cargando playlists...');
     try {
         const playlistsRes = await fetch('/playlists');
@@ -570,7 +681,6 @@ async function loadPlaylists() {
         setLoading(false);
     }
 }
-
 
 async function saveConfig() {
     try {
@@ -592,14 +702,14 @@ async function saveConfig() {
 }
 
 async function updateFilteredArtists() {
-    setLoading(true, 'Actualizando lista de artistas...');
-    
+    // Si no hay géneros ni favoritos, no hacer nada
     if (config.generos.length === 0 && config.favoriteArtists.length === 0) {
         filteredArtists = [];
         renderArtistList();
-        setLoading(false);
         return;
     }
+
+    setLoading(true, 'Actualizando lista de artistas...');
 
     try {
       const artistasRes = await fetch('/artistas-filtrados', {
@@ -628,12 +738,17 @@ async function updateFilteredArtists() {
 async function saveConfigAndUpdateArtists() {
     await saveConfig();
     renderSelectedGenres();
-    await updateFilteredArtists();
+    
+    // Solo actualizar artistas si estamos en la pestaña de Configuración
+    const configTab = document.getElementById('config');
+    if (configTab.classList.contains('active')) {
+        await updateFilteredArtists();
+    }
 }
   
 async function excludeArtist(artist, listItem) {
     if (!config.playlistId) {
-      showToast('Error: No hay una playlist seleccionada.', 'error');
+      showToast('Error: No hay una playlist seleccionada', 'error');
       return;
     }
     
@@ -672,7 +787,9 @@ async function excludeArtist(artist, listItem) {
         config.excludedArtists.push(artist.id);
       }
       
-      listItem.remove();
+      listItem.style.transition = 'all 0.3s';
+      listItem.style.transform = 'translateX(-100%)';
+      setTimeout(() => listItem.remove(), 300);
   
     } catch (err) {
       console.error('Error al excluir artista:', err);
@@ -680,7 +797,7 @@ async function excludeArtist(artist, listItem) {
       listItem.style.opacity = '1';
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Excluir Artista';
+        btn.textContent = 'Excluir';
       }
     }
 }
@@ -691,15 +808,15 @@ async function excludeArtist(artist, listItem) {
 
 async function filtrarYAnadir() {
     if (!config.playlistId) {
-      showToast('Debes seleccionar una playlist de destino primero.', 'error');
+      showToast('Debes seleccionar una playlist de destino primero', 'error');
       return;
     }
     if ((!config.generos || config.generos.length === 0) && config.favoriteArtists.length === 0) {
-      showToast('Debes seleccionar al menos un género o añadir artistas favoritos.', 'warning');
+      showToast('Debes seleccionar al menos un género o añadir artistas favoritos', 'warning');
       return;
     }
   
-    setLoading(true, 'Filtrando y añadiendo canciones (puede tardar)...');
+    setLoading(true, 'Filtrando y añadiendo canciones...');
   
     try {
       const res = await fetch('/filtrar-y-anadir', {
@@ -722,7 +839,13 @@ async function filtrarYAnadir() {
       }
       
       const data = await res.json();
-      showToast(data.message, 'success');
+      
+      if (data.errors && data.errors.length > 0) {
+        const uniqueArtists = Array.from(new Set(data.errors.map(e => e.artistName))).slice(0, 3).join(', ');
+        showToast(`${data.message}<br><small>Algunos artistas fallaron: ${uniqueArtists}...</small>`, data.addedCount > 0 ? 'warning' : 'error');
+      } else {
+        showToast(data.message, 'success');
+      }
       
       await loadAndRenderHistory(); 
       await loadPlaylists(); 
@@ -737,11 +860,14 @@ async function filtrarYAnadir() {
   
 async function vaciarPlaylist() {
     if (!config.playlistId) {
-      showToast('Debes seleccionar una playlist para vaciar.', 'error');
+      showToast('Debes seleccionar una playlist para vaciar', 'error');
       return;
     }
     
-    if (!confirm('¿Estás seguro de que quieres eliminar TODAS las canciones de esta playlist?')) {
+    const selectedPlaylist = allPlaylists.find(p => p.id === config.playlistId);
+    const playlistName = selectedPlaylist ? selectedPlaylist.name : 'la playlist seleccionada';
+    
+    if (!confirm(`¿Estás seguro de que quieres eliminar TODAS las canciones de "${playlistName}"?`)) {
       return;
     }
   

@@ -3,172 +3,957 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Track Selection Tool - Spotify</title>
+    <title>FilterFlow - Spotify Automation</title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f6f6f6; color: #191414; }
-        #app-container { max-width: 1200px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); overflow: hidden; }
-        header { background-color: #1DB954; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
-        header h1 { margin: 0; font-size: 1.8em; }
-        header span { font-size: 0.9em; opacity: 0.8; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
-        .tabs { display: flex; border-bottom: 1px solid #ddd; }
-        .tab-button { background: none; border: none; padding: 15px 25px; cursor: pointer; font-size: 1.1em; outline: none; transition: background-color 0.2s, color 0.2s; color: #535353; border-bottom: 3px solid transparent; }
-        .tab-button:hover { background-color: #f0f0f0; }
-        .tab-button.active { color: #1DB954; border-bottom: 3px solid #1DB954; font-weight: bold; }
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --bg-card: #ffffff;
+            --text-primary: #1a1a1a;
+            --text-secondary: #6b7280;
+            --border: #e5e7eb;
+            --accent: #1DB954;
+            --accent-hover: #1ed760;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --shadow: rgba(0, 0, 0, 0.05);
+        }
         
-        .tab-content { padding: 20px 30px; display: none; }
-        .tab-content.active { display: block; }
-
-        .section-header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; color: #1DB954; font-size: 1.4em; }
+        [data-theme="dark"] {
+            --bg-primary: #0a0a0a;
+            --bg-secondary: #141414;
+            --bg-card: #1a1a1a;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --border: #2a2a2a;
+            --shadow: rgba(0, 0, 0, 0.3);
+        }
         
-        /* Layout de Configuración */
-        /* 🛑 ACTUALIZADO: Cambiado a 3 columnas para los 3 bloques */
-        #config-tab { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 40px; }
-        .config-block { padding: 15px; border: 1px solid #eee; border-radius: 6px; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: background 0.3s, color 0.3s;
+        }
         
-        /* Géneros */
-        #selected-genres { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; min-height: 40px; }
-        .genre { background-color: #1DB954; color: white; padding: 5px 10px; border-radius: 20px; display: flex; align-items: center; font-size: 0.9em; }
-        .genre .remove-btn { background: none; border: none; color: white; margin-left: 5px; cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 0 3px; }
-        #all-genres { position: absolute; background: white; border: 1px solid #ddd; z-index: 10; padding: 10px; max-height: 300px; overflow-y: scroll; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); border-radius: 6px; width: 300px; margin-top: 5px; }
-        .genre-option { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
-        .genre-option:hover { background-color: #f6f6f6; }
-        .genre-option.selected { background-color: #e0f8e9; font-weight: bold; }
-        #genre-search { padding: 8px; margin-bottom: 10px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
-
-        /* Playlist */
-        #selected-playlist-display { display: flex; align-items: center; gap: 15px; padding: 15px; border: 2px dashed #1DB954; border-radius: 6px; margin-top: 10px; }
-        #selected-playlist-display img { width: 60px; height: 60px; border-radius: 4px; object-fit: cover; }
-        #playlist-results { max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-top: 10px; }
-        .playlist-option { display: flex; align-items: center; padding: 10px; cursor: pointer; border-bottom: 1px solid #f6f6f6; }
-        .playlist-option img { width: 40px; height: 40px; margin-right: 10px; border-radius: 3px; object-fit: cover; }
-        .playlist-option:hover { background-color: #f9f9f9; }
-        .playlist-option.selected { background-color: #e0f8e9; border-left: 5px solid #1DB954; padding-left: 5px; }
-
-        /* Artistas */
-        #artist-list { list-style: none; padding: 0; max-height: 350px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-top: 10px; }
-        /* 🛑 NUEVO: Lista de artistas favoritos (estilo) */
-        #favorite-artist-list { list-style: none; padding: 0; max-height: 250px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-top: 10px; }
-        #artist-list li, #favorite-artist-list li { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #f6f6f6; }
-        #artist-list li:last-child, #favorite-artist-list li:last-child { border-bottom: none; }
-        .remove-artist-btn { background-color: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 0.85em; }
-        .remove-artist-btn:hover { background-color: #d32f2f; }
-        /* 🛑 NUEVO: Estilos para el botón de añadir artista */
-        #search-results button.add-artist-btn { background-color: #535353; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; margin-right: 5px; margin-bottom: 5px;}
-        #search-results { margin-top: 10px; }
-
-        /* Acciones */
-        #main-actions { padding: 30px; background-color: #f9f9f9; border-top: 1px solid #eee; text-align: center; grid-column: 1 / -1; /* Ocupa todo el ancho en la configuración */ }
-        .btn { padding: 15px 30px; font-size: 1.1em; border: none; border-radius: 25px; cursor: pointer; transition: background-color 0.3s; margin: 0 10px; font-weight: bold; }
-        #run-btn { background-color: #1DB954; color: white; }
-        #run-btn:hover { background-color: #1aa049; }
-        #clear-btn { background-color: #f44336; color: white; }
-        #clear-btn:hover { background-color: #d32f2f; }
-
-        /* Monitor */
-        #history-list { list-style: none; padding: 0; }
-        .history-item { border: 1px solid #ddd; margin-bottom: 15px; padding: 15px; border-radius: 6px; cursor: pointer; background-color: #fff; }
-        .history-item:hover { background-color: #f9f9f9; }
-        .history-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px; }
-        .history-details { display: none; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; font-size: 0.9em; }
-        .history-details table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        .history-details th, .history-details td { border: 1px solid #eee; padding: 8px; text-align: left; }
-        .history-details th { background-color: #f6f6f6; }
-
-        /* Utilidades */
-        .hidden { display: none !important; }
-        .empty-message { color: #888; text-align: center; padding: 20px; }
+        /* Header */
+        .header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
         
-        /* Toast y Loading */
-        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
-        .message-toast { background-color: #333; color: white; padding: 10px 20px; border-radius: 4px; margin-bottom: 10px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(20px); }
-        .message-toast.show { opacity: 1; transform: translateY(0); }
-        .message-toast.error { background-color: #f44336; }
-        .message-toast.success { background-color: #1DB954; }
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent), #1ed760);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
         
-        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.9); z-index: 999; display: none; flex-direction: column; justify-content: center; align-items: center; font-size: 1.5em; color: #1DB954; }
-        #loading::before { content: ''; border: 4px solid #f3f3f3; border-top: 4px solid #1DB954; border-radius: 50%; wspanith: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 15px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+        
+        .user-info {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        
+        .theme-toggle {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .theme-toggle:hover {
+            transform: scale(1.1);
+            border-color: var(--accent);
+        }
+        
+        /* Navigation */
+        .nav {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 0 2rem;
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        .nav-btn {
+            background: none;
+            border: none;
+            padding: 1rem 1.5rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        
+        .nav-btn:hover {
+            color: var(--text-primary);
+        }
+        
+        .nav-btn.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+        
+        /* Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        
+        .tab-content {
+            display: none;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        /* Grid Layout */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        /* Genres */
+        .genre-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            min-height: 40px;
+        }
+        
+        .chip {
+            background: var(--accent);
+            color: white;
+            padding: 0.6rem 1.2rem;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.875rem;
+            animation: slideIn 0.3s;
+        }
+        
+        .chip-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .chip-remove {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 1rem;
+            line-height: 1;
+            padding: 0;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        
+        .chip-remove:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.1);
+        }
+        
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .btn-primary:hover:not(:disabled) {
+            background: var(--accent-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(29, 185, 84, 0.3);
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: var(--danger-hover);
+        }
+        
+        .btn-secondary {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--border);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        /* Input */
+        .input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+        
+        .input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(29, 185, 84, 0.1);
+        }
+        
+        /* Dropdown */
+        .dropdown {
+            position: relative;
+        }
+        
+        .dropdown-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-top: 0.5rem;
+            max-height: 300px;
+            overflow-y: auto;
+            box-shadow: 0 10px 25px var(--shadow);
+            z-index: 10;
+        }
+        
+        .dropdown-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .dropdown-item:last-child {
+            border-bottom: none;
+        }
+        
+        .dropdown-item:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .dropdown-item.selected {
+            background: rgba(29, 185, 84, 0.1);
+            color: var(--accent);
+            font-weight: 500;
+        }
+        
+        /* Playlist Selection */
+        .playlist-display {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border: 2px dashed var(--accent);
+        }
+        
+        .playlist-display img {
+            width: 60px;
+            height: 60px;
+            border-radius: 6px;
+            object-fit: cover;
+        }
+        
+        /* Artists List */
+        .artist-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+            transition: background 0.2s;
+        }
+        
+        .artist-item:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .artist-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* Recommended Artists */
+        .recommended-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1rem;
+            max-height: 450px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            padding-right: 0.25rem;
+        }
+        
+        .artist-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            opacity: 1;
+            transform: scale(1);
+        }
+        
+        .artist-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 20px var(--shadow);
+            border-color: var(--accent);
+        }
+        
+        .artist-card img {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            object-fit: cover;
+            margin-bottom: 0.75rem;
+        }
+        
+        .artist-card-name {
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .artist-card-genre {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.75rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .artist-card .btn {
+            width: 100%;
+            padding: 0.5rem;
+            font-size: 0.75rem;
+        }
+        
+        .artist-card.added {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        
+        .artist-card.added .btn {
+            background: var(--text-secondary);
+        }
+        
+        /* Favorite Artists List */
+        .favorite-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+        
+        .favorite-chip {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 0.875rem;
+            max-width: 200px;
+        }
+        
+        .favorite-chip span {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .favorite-chip img {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            object-fit: cover;
+            flex-shrink: 0;
+        }
+        
+        .favorite-chip-remove {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.2rem;
+            line-height: 1;
+            padding: 0;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        
+        .favorite-chip-remove:hover {
+            background: var(--border);
+            color: var(--danger);
+        }
+        
+        /* History */
+        .history-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .history-item:hover {
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+        
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .history-date {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+        
+        .history-stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .stat-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .stat-success {
+            background: rgba(29, 185, 84, 0.1);
+            color: var(--accent);
+        }
+        
+        .stat-error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+        }
+        
+        .history-details {
+            display: none;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+        }
+        
+        .history-details table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1rem;
+        }
+        
+        .history-details th,
+        .history-details td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        
+        .history-details th {
+            font-weight: 600;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+        
+        /* Action Bar */
+        .action-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border);
+            padding: 1.5rem;
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            box-shadow: 0 -4px 12px var(--shadow);
+            z-index: 50;
+        }
+        
+        .action-bar .btn {
+            min-width: 200px;
+            justify-content: center;
+        }
+        
+        /* Loading */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            color: white;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 2000;
+        }
+        
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1rem 1.5rem;
+            margin-top: 0.5rem;
+            box-shadow: 0 4px 12px var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            min-width: 300px;
+            animation: slideInRight 0.3s;
+        }
+        
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes slideOutRight {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100%); }
+        }
+        
+        .toast.success { border-left: 4px solid var(--accent); }
+        .toast.error { border-left: 4px solid var(--danger); }
+        .toast.warning { border-left: 4px solid #f59e0b; }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+        
+        .hidden {
+            display: none !important;
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+            
+            .logo {
+                font-size: 1.25rem;
+            }
+            
+            .nav {
+                padding: 0 1rem;
+                overflow-x: auto;
+            }
+            
+            .nav-btn {
+                padding: 0.75rem 1rem;
+                font-size: 0.8rem;
+                white-space: nowrap;
+            }
+            
+            .container {
+                padding: 1rem;
+            }
+            
+            .grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .recommended-grid {
+                grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+                gap: 0.75rem;
+            }
+            
+            .artist-card {
+                padding: 0.75rem;
+            }
+            
+            .artist-card img {
+                width: 60px;
+                height: 60px;
+            }
+            
+            .action-bar {
+                flex-direction: column;
+                padding: 1rem;
+            }
+            
+            .action-bar .btn {
+                width: 100%;
+                min-width: auto;
+            }
+            
+            .toast-container {
+                right: 1rem;
+                left: 1rem;
+                bottom: 100px;
+            }
+            
+            .toast {
+                min-width: auto;
+            }
+        }
     </style>
 </head>
-<body>
-
-    <div id="loading" style="display: none;">Cargando...</div>
-
-    <div id="app-container">
-        <header>
-            <h1>Spotify Track Selection</h1>
-            <span>Usuario: <strong id="spotify-user-id">Cargando...</strong></span>
-        </header>
-
-        <div class="tabs">
-            <button class="tab-button active" data-tab="config-tab">Configuración</button>
-            <button class="tab-button" data-tab="artists-tab">Artistas Filtrados</button>
-            <button class="tab-button" data-tab="monitor-tab">Monitor/Historial</button>
-        </div>
-
-        <div id="config-tab" class="tab-content active">
-            
-            <div class="config-block">
-                <h2 class="section-header">1. Selección de Géneros</h2>
-                <div id="selected-genres">
-                    </div>
-                <button id="add-genre-btn" class="btn" style="background-color: #535353; color: white; margin-top: 15px; padding: 10px 20px;">Añadir/Quitar Géneros</button>
-                
-                <div id="all-genres" class="hidden">
-                    <input type="text" id="genre-search" placeholder="Buscar género...">
-                    <div id="genre-list-container">
-                        </div>
-                </div>
-            </div>
-
-            <div class="config-block">
-                <h2 class="section-header">2. Playlist de Destino</h2>
-                <div id="selected-playlist-display" class="hidden">
-                    </div>
-                
-                <h3 style="margin-top: 20px;">Buscar y Seleccionar Playlist</h3>
-                <input type="text" id="playlist-search" placeholder="Buscar por nombre..." style="padding: 8px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
-                <div id="playlist-results">
-                    </div>
-            </div>
-            
-            <div class="config-block">
-                <h2 class="section-header">3. Artistas Favoritos (App)</h2>
-                <p>Añade artistas cuya música quieres seguir, independientemente de si los sigues en Spotify o de sus géneros principales.</p>
-                <input type="text" id="favorite-artist-search" placeholder="Buscar y añadir artista por nombre..." style="padding: 8px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
-                <div id="favorite-search-results">
-                    </div>
-                <h3 style="margin-top: 20px;">Mi Lista de Favoritos</h3>
-                <ul id="favorite-artist-list">
-                    </ul>
-            </div>
-
-            </div>
-
-        <div id="artists-tab" class="tab-content">
-            <h2 class="section-header">Artistas a Monitorizar</h2>
-            <p>Se muestran los artistas que sigues en Spotify (y coinciden con los géneros) **más** tus artistas favoritos de la App. Puedes **excluir** artistas para que sus nuevos lanzamientos no se añadan a la playlist.</p>
-            <ul id="artist-list">
-                <li class="empty-message">Selecciona géneros o añade favoritos para ver la lista.</li>
-            </ul>
-        </div>
-        
-        <div id="monitor-tab" class="tab-content">
-            <h2 class="section-header">Historial de Ejecuciones</h2>
-            <ul id="history-list">
-                </ul>
-        </div>
-        
-        <div id="main-actions" style="grid-column: 1 / -1;">
-            <button id="run-btn" class="btn" onclick="filtrarYAnadir()">EJECUTAR FILTRO Y AÑADIR</button>
-            <button id="clear-btn" class="btn" onclick="vaciarPlaylist()">VACIAR PLAYLIST SELECCIONADA</button>
-        </div>
-        
+<body data-theme="light">
+    <!-- Loading Overlay -->
+    <div id="loading" class="loading-overlay hidden">
+        <div class="spinner"></div>
+        <div id="loading-text">Cargando...</div>
     </div>
     
-    <div id="toast-container"></div>
-
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+    
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">FilterFlow</div>
+        <div class="header-actions">
+            <div class="user-info">
+                <span id="spotify-user-id">Cargando...</span>
+            </div>
+            <button class="theme-toggle" id="theme-toggle" title="Cambiar tema">
+                <span id="theme-icon">🌙</span>
+            </button>
+        </div>
+    </header>
+    
+    <!-- Navigation -->
+    <nav class="nav">
+        <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
+        <button class="nav-btn" data-tab="config">Configuración</button>
+        <button class="nav-btn" data-tab="history">Historial</button>
+    </nav>
+    
+    <!-- Main Container -->
+    <div class="container" style="padding-bottom: 100px;">
+        
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <div class="grid">
+                <!-- Genres Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Géneros Activos</h3>
+                        <button id="add-genre-btn" class="btn btn-secondary btn-sm">+ Añadir</button>
+                    </div>
+                    <div id="selected-genres" class="genre-chips">
+                        <div class="empty-state">
+                            <div>No hay géneros seleccionados</div>
+                        </div>
+                    </div>
+                    
+                    <div id="all-genres" class="dropdown hidden">
+                        <div class="dropdown-content">
+                            <input type="text" id="genre-search" class="input" placeholder="Buscar género..." style="margin: 0.5rem; width: calc(100% - 1rem);">
+                            <div id="genre-list-container"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Playlist Card -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3 class="card-title">Playlist de Destino</h3>
+                    </div>
+                    <div id="selected-playlist-display" class="hidden"></div>
+                    <input type="text" id="playlist-search" class="input" placeholder="Buscar playlist..." style="margin-top: 1rem;">
+                    <div id="playlist-results" class="dropdown-content hidden" style="position: relative; margin-top: 0.5rem;"></div>
+                </div>
+            </div>
+            
+            <!-- Favorite Artists Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Artistas Favoritos</h3>
+                </div>
+                <input type="text" id="favorite-artist-search" class="input" placeholder="Buscar artista en Spotify...">
+                <div id="favorite-search-results" style="margin-top: 1rem;"></div>
+                <ul id="favorite-artist-list" style="list-style: none; margin-top: 1rem;"></ul>
+            </div>
+            
+            <!-- Recommended Artists Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">✨ Artistas Recomendados</h3>
+                    <button id="refresh-recommended-btn" class="btn btn-secondary btn-sm">🔄</button>
+                </div>
+                <div id="recommended-artists-list" class="recommended-grid">
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <div class="empty-state-icon">✨</div>
+                        <div>Haz click en 🔄 para obtener recomendaciones</div>
+                        <small style="color: var(--text-secondary);">Basadas en tus géneros seleccionados</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Config Tab -->
+        <div id="config" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Artistas Monitorizados</h3>
+                </div>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">Artistas que cumplen con tus filtros y serán revisados en la próxima ejecución.</p>
+                <div id="artist-list" style="max-height: 600px; overflow-y: auto;"></div>
+            </div>
+        </div>
+        
+        <!-- History Tab -->
+        <div id="history" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Historial de Ejecuciones</h3>
+                </div>
+                <div id="history-list"></div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Action Bar -->
+    <div class="action-bar">
+        <button id="run-filter-btn" class="btn btn-primary">
+            ▶️ Filtrar y Añadir
+        </button>
+        <button id="empty-playlist-btn" class="btn btn-danger">
+            🗑️ Vaciar Playlist
+        </button>
+    </div>
+    
     <script src="script.js"></script>
+    <script>
+        // Theme Toggle
+        const themeToggle = document.getElementById('theme-toggle');
+        const themeIcon = document.getElementById('theme-icon');
+        const body = document.body;
+        
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') || 'light';
+        body.setAttribute('data-theme', savedTheme);
+        themeIcon.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+        
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = body.getAttribute('data-theme');
+            const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+            body.setAttribute('data-theme', newTheme);
+            themeIcon.textContent = newTheme === 'dark' ? '☀️' : '🌙';
+            localStorage.setItem('theme', newTheme);
+        });
+        
+        // Tab Navigation
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const tab = btn.dataset.tab;
+                
+                // Update nav
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                
+                // Update content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(tab).classList.add('active');
+                
+                // Cargar datos SOLO cuando se accede a la pestaña
+                if (tab === 'history') {
+                    loadAndRenderHistory();
+                } else if (tab === 'config') {
+                    // Solo cargar si hay géneros o favoritos y aún no se han cargado
+                    if ((config.generos.length > 0 || config.favoriteArtists.length > 0) && filteredArtists.length === 0) {
+                        updateFilteredArtists();
+                    } else if (filteredArtists.length === 0) {
+                        renderArtistList(); // Mostrar mensaje vacío
+                    }
+                }
+            });
+        });
+        
+        // Genre dropdown toggle
+        document.getElementById('add-genre-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const dropdown = document.getElementById('all-genres');
+            dropdown.classList.toggle('hidden');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('all-genres');
+            const btn = document.getElementById('add-genre-btn');
+            if (!dropdown.contains(e.target) && e.target !== btn) {
+                dropdown.classList.add('hidden');
+            }
+        });
+        
+        // Playlist search handling
+        document.getElementById('playlist-search').addEventListener('focus', () => {
+            document.getElementById('playlist-results').classList.remove('hidden');
+        });
+        
+        document.getElementById('playlist-search').addEventListener('blur', (e) => {
+            setTimeout(() => {
+                document.getElementById('playlist-results').classList.add('hidden');
+            }, 200);
+        });
+    </script>
 </body>
 </html>

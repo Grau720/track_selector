@@ -1,0 +1,15 @@
+# === Node.js y dependencias ===
+node_modules/
+npm-debug.log*
+.DS_Store
+
+# === Configuración local ===
+.env
+.env.local
+configs.json
+history.json
+db_data.json
+
+# === Archivos temporales o de build ===
+dist/
+build/
