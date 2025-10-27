@@ -1,15 +1,19 @@
-# === Node.js y dependencias ===
+# === Node.js ===
 node_modules/
 npm-debug.log*
 .DS_Store
 
-# === Configuración local ===
+# === Archivos locales ===
 .env
 .env.local
 configs.json
 history.json
 db_data.json
 
-# === Archivos temporales o de build ===
+# === VSCode y configuraciones ===
+.vscode/
+.vscode-root/
+
+# === Build/Distribución ===
 dist/
 build/

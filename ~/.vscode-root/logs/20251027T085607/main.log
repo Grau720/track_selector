@@ -1,7 +1,0 @@
-2025-10-27 08:56:08.363 [info] update#setState disabled
-2025-10-27 08:56:08.375 [info] update#ctor - updates are disabled as there is no update URL
-2025-10-27 16:27:35.935 [info] Extension host with pid 15010 exited with code: 2, signal: unknown.
-2025-10-27 16:27:35.943 [error] [UtilityProcess id: 1, type: extensionHost, pid: 15010]: crashed with code 2 and reason 'killed'
-2025-10-27 16:27:35.953 [error] [UtilityProcessWorker]: terminated unexpectedly with code 2, signal: unknown
-2025-10-27 16:27:35.955 [error] [UtilityProcess id: 1, type: fileWatcher, pid: 14992]: crashed with code 2 and reason 'killed'
-2025-10-27 16:27:35.960 [error] [UtilityProcess type: shared-process, pid: 14991]: crashed with code 2 and reason 'killed'
