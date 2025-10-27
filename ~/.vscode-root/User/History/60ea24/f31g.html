@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Track Selector - Dashboard</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f5f5f5;
+    }
+
+    header {
+      background-color: #1db954;
+      color: white;
+      text-align: center;
+      padding: 1rem;
+    }
+
+    .platforms {
+      display: flex;
+      justify-content: center;
+      gap: 2rem;
+      margin-top: 3rem;
+    }
+
+    .platform-card {
+      background-color: white;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      width: 200px;
+      text-align: center;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+
+    .platform-card:hover {
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎧 Track Selector para DJs</h1>
+    <p>Selecciona una plataforma para continuar</p>
+  </header>
+
+  <div class="platforms">
+    <div class="platform-card" onclick="location.href='spotify.html'">Spotify</div>
+    <div class="platform-card">Bandcamp (próximamente)</div>
+    <div class="platform-card">SoundCloud (próximamente)</div>
+  </div>
+</body>
+</html>

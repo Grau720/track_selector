@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spotify Selector</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>🎧 Spotify Track Selector</h1>
+  </header>
+  <main>
+    <section id="config-section">
+      <h2>🎵 Géneros seleccionados</h2>
+      <div id="selected-genres" class="grid"></div>
+      <button id="add-genres-btn">➕ Añadir más géneros</button>
+
+      <div id="more-genres-section" class="hidden">
+        <h3>Elige más géneros</h3>
+        <div id="all-genres" class="grid"></div>
+      </div>
+
+      <h2>👥 Artistas seleccionados</h2>
+      <ul id="artist-list"></ul>
+
+      <h2>📀 Playlist seleccionada</h2>
+      <div id="playlist-info"></div>
+
+      <div class="actions">
+        <button id="update-tracks-btn">🔄 Actualizar canciones</button>
+        <button id="vaciar-playlist-btn">🗑️ Vaciar playlist</button>
+      </div>
+
+      <p id="status"></p>
+    </section>
+  </main>
+  <script src="spotify.js"></script>
+</body>
+</html>

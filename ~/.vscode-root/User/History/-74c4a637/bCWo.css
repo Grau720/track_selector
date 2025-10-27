@@ -1,0 +1,85 @@
+body {
+    font-family: sans-serif;
+    background-color: #f2f2f2;
+    margin: 0;
+    padding: 0;
+  }
+  
+  header {
+    background-color: #1db954;
+    color: white;
+    padding: 1rem;
+    text-align: center;
+  }
+  
+  .container {
+    padding: 2rem;
+  }
+  
+  h2 {
+    margin-top: 2rem;
+  }
+  
+  .genres,
+  .playlists {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1rem;
+  }
+  
+  .genre,
+  .playlist {
+    background-color: white;
+    border-radius: 10px;
+    padding: 0.75rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    text-align: center;
+  }
+  
+  .genre:hover,
+  .playlist:hover {
+    transform: scale(1.03);
+  }
+  
+  .genre.selected,
+  .playlist.selected {
+    border: 2px solid #1db954;
+  }
+  
+  .cover {
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+  }
+  
+  .actions {
+    margin-top: 2rem;
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+  
+  .btn {
+    background-color: #1db954;
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    font-size: 1rem;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: background 0.3s ease;
+  }
+  
+  .btn:hover {
+    background-color: #159744;
+  }
+  
+  #loading {
+    text-align: center;
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+  }
+  

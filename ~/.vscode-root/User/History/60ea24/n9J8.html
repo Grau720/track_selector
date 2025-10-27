@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Track Selection Tool - Spotify</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background-color: #f6f6f6; color: #191414; }
+        #app-container { max-width: 1200px; margin: 20px auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); overflow: hidden; }
+        header { background-color: #1DB954; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+        header h1 { margin: 0; font-size: 1.8em; }
+        header span { font-size: 0.9em; opacity: 0.8; }
+        
+        .tabs { display: flex; border-bottom: 1px solid #ddd; }
+        .tab-button { background: none; border: none; padding: 15px 25px; cursor: pointer; font-size: 1.1em; outline: none; transition: background-color 0.2s, color 0.2s; color: #535353; border-bottom: 3px solid transparent; }
+        .tab-button:hover { background-color: #f0f0f0; }
+        .tab-button.active { color: #1DB954; border-bottom: 3px solid #1DB954; font-weight: bold; }
+        
+        .tab-content { padding: 20px 30px; display: none; }
+        .tab-content.active { display: block; }
+
+        .section-header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 20px; color: #1DB954; font-size: 1.4em; }
+        
+        /* Layout de Configuración */
+        #config-tab { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+        .config-block { padding: 15px; border: 1px solid #eee; border-radius: 6px; }
+        
+        /* Géneros */
+        #selected-genres { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; min-height: 40px; }
+        .genre { background-color: #1DB954; color: white; padding: 5px 10px; border-radius: 20px; display: flex; align-items: center; font-size: 0.9em; }
+        .genre .remove-btn { background: none; border: none; color: white; margin-left: 5px; cursor: pointer; font-weight: bold; font-size: 1.1em; padding: 0 3px; }
+        #all-genres { position: absolute; background: white; border: 1px solid #ddd; z-index: 10; padding: 10px; max-height: 300px; overflow-y: scroll; box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); border-radius: 6px; width: 300px; margin-top: 5px; }
+        .genre-option { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
+        .genre-option:hover { background-color: #f6f6f6; }
+        .genre-option.selected { background-color: #e0f8e9; font-weight: bold; }
+        #genre-search { padding: 8px; margin-bottom: 10px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+
+        /* Playlist */
+        #selected-playlist-display { display: flex; align-items: center; gap: 15px; padding: 15px; border: 2px dashed #1DB954; border-radius: 6px; margin-top: 10px; }
+        #selected-playlist-display img { width: 60px; height: 60px; border-radius: 4px; object-fit: cover; }
+        #playlist-results { max-height: 300px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-top: 10px; }
+        .playlist-option { display: flex; align-items: center; padding: 10px; cursor: pointer; border-bottom: 1px solid #f6f6f6; }
+        .playlist-option img { width: 40px; height: 40px; margin-right: 10px; border-radius: 3px; object-fit: cover; }
+        .playlist-option:hover { background-color: #f9f9f9; }
+        .playlist-option.selected { background-color: #e0f8e9; border-left: 5px solid #1DB954; padding-left: 5px; }
+
+        /* Artistas */
+        #artist-list { list-style: none; padding: 0; max-height: 350px; overflow-y: auto; border: 1px solid #eee; border-radius: 4px; margin-top: 10px; }
+        #artist-list li { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #f6f6f6; }
+        #artist-list li:last-child { border-bottom: none; }
+        .remove-artist-btn { background-color: #f44336; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; transition: background-color 0.2s; font-size: 0.85em; }
+        .remove-artist-btn:hover { background-color: #d32f2f; }
+        
+        /* Acciones */
+        #main-actions { padding: 30px; background-color: #f9f9f9; border-top: 1px solid #eee; text-align: center; }
+        .btn { padding: 15px 30px; font-size: 1.1em; border: none; border-radius: 25px; cursor: pointer; transition: background-color 0.3s; margin: 0 10px; font-weight: bold; }
+        #run-btn { background-color: #1DB954; color: white; }
+        #run-btn:hover { background-color: #1aa049; }
+        #clear-btn { background-color: #f44336; color: white; }
+        #clear-btn:hover { background-color: #d32f2f; }
+
+        /* Monitor */
+        #history-list { list-style: none; padding: 0; }
+        .history-item { border: 1px solid #ddd; margin-bottom: 15px; padding: 15px; border-radius: 6px; cursor: pointer; background-color: #fff; }
+        .history-item:hover { background-color: #f9f9f9; }
+        .history-header { display: flex; justify-content: space-between; font-weight: bold; margin-bottom: 10px; }
+        .history-details { display: none; margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; font-size: 0.9em; }
+        .history-details table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .history-details th, .history-details td { border: 1px solid #eee; padding: 8px; text-align: left; }
+        .history-details th { background-color: #f6f6f6; }
+
+        /* Utilidades */
+        .hidden { display: none !important; }
+        .empty-message { color: #888; text-align: center; padding: 20px; }
+        
+        /* Toast y Loading */
+        #toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 1000; }
+        .message-toast { background-color: #333; color: white; padding: 10px 20px; border-radius: 4px; margin-bottom: 10px; opacity: 0; transition: opacity 0.3s, transform 0.3s; transform: translateY(20px); }
+        .message-toast.show { opacity: 1; transform: translateY(0); }
+        .message-toast.error { background-color: #f44336; }
+        .message-toast.success { background-color: #1DB954; }
+        
+        #loading { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.9); z-index: 999; display: none; flex-direction: column; justify-content: center; align-items: center; font-size: 1.5em; color: #1DB954; }
+        #loading::before { content: ''; border: 4px solid #f3f3f3; border-top: 4px solid #1DB954; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin-bottom: 15px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div id="loading" style="display: none;">Cargando...</div>
+
+    <div id="app-container">
+        <header>
+            <h1>Spotify Track Selection</h1>
+            <span>Usuario: <strong id="spotify-user-id">Cargando...</strong></span>
+        </header>
+
+        <div class="tabs">
+            <button class="tab-button active" data-tab="config-tab">Configuración</button>
+            <button class="tab-button" data-tab="artists-tab">Artistas Filtrados</button>
+            <button class="tab-button" data-tab="monitor-tab">Monitor/Historial</button>
+        </div>
+
+        <div id="config-tab" class="tab-content active">
+            
+            <div class="config-block">
+                <h2 class="section-header">1. Selección de Géneros (Seguidos)</h2>
+                <div id="selected-genres">
+                    </div>
+                <button id="add-genre-btn" class="btn" style="background-color: #535353; color: white; margin-top: 15px; padding: 10px 20px;">Añadir/Quitar Géneros</button>
+                
+                <div id="all-genres" class="hidden">
+                    <input type="text" id="genre-search" placeholder="Buscar género...">
+                    <div id="genre-list-container">
+                        </div>
+                </div>
+            </div>
+
+            <div class="config-block">
+                <h2 class="section-header">2. Playlist de Destino</h2>
+                <div id="selected-playlist-display" class="hidden">
+                    </div>
+                
+                <h3 style="margin-top: 20px;">Buscar y Seleccionar Playlist</h3>
+                <input type="text" id="playlist-search" placeholder="Buscar por nombre..." style="padding: 8px; width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px;">
+                <div id="playlist-results">
+                    </div>
+            </div>
+
+        </div>
+
+        <div id="artists-tab" class="tab-content">
+            <h2 class="section-header">Artistas Seguidos por Género</h2>
+            <p>Se muestran los artistas que sigues actualmente en Spotify y que coinciden con los géneros seleccionados. Puedes **excluir** artistas para que sus nuevos lanzamientos no se añadan a la playlist.</p>
+            <ul id="artist-list">
+                <li class="empty-message">Selecciona géneros para ver la lista.</li>
+            </ul>
+        </div>
+        
+        <div id="monitor-tab" class="tab-content">
+            <h2 class="section-header">Historial de Ejecuciones</h2>
+            <ul id="history-list">
+                </ul>
+        </div>
+        
+        <div id="main-actions">
+            <button id="run-btn" class="btn" onclick="filtrarYAnadir()">EJECUTAR FILTRO Y AÑADIR</button>
+            <button id="clear-btn" class="btn" onclick="vaciarPlaylist()">VACIAR PLAYLIST SELECCIONADA</button>
+        </div>
+        
+    </div>
+    
+    <div id="toast-container"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>

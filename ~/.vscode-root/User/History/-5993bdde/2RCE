@@ -1,0 +1,128 @@
+document.addEventListener('DOMContentLoaded', async () => {
+  const selectedGenresContainer = document.getElementById('selected-genres');
+  const allGenresContainer = document.getElementById('all-genres');
+  const artistList = document.getElementById('artist-list');
+  const playlistInfo = document.getElementById('playlist-info');
+  const status = document.getElementById('status');
+
+  const config = await fetch('/config').then(res => res.json());
+  const allGenres = await fetch('/generos').then(res => res.json());
+  const playlists = await fetch('/playlists').then(res => res.json());
+
+  let currentGenres = config.generos || [];
+  let currentPlaylist = config.playlistId || null;
+
+  const renderGenres = () => {
+    selectedGenresContainer.innerHTML = '';
+    currentGenres.forEach(genre => {
+      const div = document.createElement('div');
+      div.textContent = genre;
+      div.className = 'genre';
+      div.onclick = () => {
+        currentGenres = currentGenres.filter(g => g !== genre);
+        saveConfig();
+        renderGenres();
+        fetchArtists();
+      };
+      selectedGenresContainer.appendChild(div);
+    });
+  };
+
+  const renderAllGenres = () => {
+    allGenresContainer.innerHTML = '';
+    allGenres.forEach(genre => {
+      if (!currentGenres.includes(genre)) {
+        const div = document.createElement('div');
+        div.textContent = genre;
+        div.className = 'genre';
+        div.onclick = () => {
+          currentGenres.push(genre);
+          saveConfig();
+          renderGenres();
+          renderAllGenres();
+          fetchArtists();
+        };
+        allGenresContainer.appendChild(div);
+      }
+    });
+  };
+
+  const fetchArtists = async () => {
+    artistList.innerHTML = '';
+    const data = await fetch('/seguidores').then(res => res.json());
+    data.artists.forEach(artist => {
+      const li = document.createElement('li');
+      li.textContent = artist.name;
+      li.onclick = async () => {
+        await fetch('/eliminar-artista', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ artistId: artist.id })
+        });
+        fetchArtists();
+      };
+      artistList.appendChild(li);
+    });
+  };
+
+  const renderPlaylist = () => {
+    playlistInfo.innerHTML = '';
+    const selected = playlists.find(p => p.id === currentPlaylist);
+    if (selected) {
+      const div = document.createElement('div');
+      div.innerHTML = `<strong>${selected.name}</strong><br><img src="${selected.image}" alt="cover">`;
+      playlistInfo.appendChild(div);
+    } else {
+      playlists.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'playlist-option';
+        div.textContent = p.name;
+        div.onclick = () => {
+          currentPlaylist = p.id;
+          saveConfig();
+          renderPlaylist();
+        };
+        playlistInfo.appendChild(div);
+      });
+    }
+  };
+
+  const saveConfig = async () => {
+    await fetch('/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generos: currentGenres, playlistId: currentPlaylist })
+    });
+  };
+
+  document.getElementById('add-genres-btn').onclick = () => {
+    document.getElementById('more-genres-section').classList.toggle('hidden');
+    renderAllGenres();
+  };
+
+  document.getElementById('update-tracks-btn').onclick = async () => {
+    status.textContent = '⏳ Añadiendo canciones...';
+    const res = await fetch('/filtrar-y-anadir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ generos: currentGenres, playlistId: currentPlaylist })
+    });
+    const text = await res.text();
+    status.textContent = text;
+  };
+
+  document.getElementById('vaciar-playlist-btn').onclick = async () => {
+    status.textContent = '⏳ Vaciando...';
+    const res = await fetch('/vaciar-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlistId: currentPlaylist })
+    });
+    const text = await res.text();
+    status.textContent = text;
+  };
+
+  renderGenres();
+  renderPlaylist();
+  fetchArtists();
+});

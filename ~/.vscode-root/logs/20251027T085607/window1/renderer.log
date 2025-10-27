@@ -1,0 +1,9 @@
+2025-10-27 08:56:11.552 [info] ChatSessionStore: Migrating 0 chat sessions from storage service to file system
+2025-10-27 08:56:11.971 [info] Started local extension host with pid 15010.
+2025-10-27 08:56:15.318 [warning] Creation of workbench contribution 'chat.nativeBuiltinTools' took 337ms.
+2025-10-27 08:56:16.539 [info] [perf] Render performance baseline is 79ms
+2025-10-27 16:27:35.975 [error] Extension host (LocalProcess pid: 15010) terminated unexpectedly. The following extensions were running: vscode.git-base, vscode.npm, vscode.github, vscode.git, vscode.debug-auto-launch, vscode.merge-conflict, vscode.typescript-language-features, vscode.emmet, vscode.configuration-editing, vscode.extension-editing, vscode.json-language-features, vscode.vscode-colorize-perf-tests, vscode.vscode-colorize-tests, vscode.html-language-features, vscode.css-language-features
+2025-10-27 16:27:35.978 [info] Automatically restarting the extension host.
+2025-10-27 16:27:36.177 [error] [UtilityProcessWorker]: terminated unexpectedly with code 2, signal: unknown
+2025-10-27 16:27:36.187 [error] [File Watcher (universal)] restarting watcher after unexpected error: terminated by itself unexpectedly with code 2, signal: unknown (ETERM)
+2025-10-27 16:27:36.482 [info] Started local extension host with pid 117972.

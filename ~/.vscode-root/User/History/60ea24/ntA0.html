@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Selector Musical</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <h1>🎧 Selector Musical para DJs</h1>
+  </header>
+
+  <main>
+    <section id="status"></section>
+
+    <section>
+      <h2>1. Selecciona una playlist</h2>
+      <div id="playlists" class="grid"></div>
+    </section>
+
+    <section>
+      <h2>2. Selecciona géneros</h2>
+      <div id="generos" class="grid"></div>
+    </section>
+
+    <div class="actions">
+      <button id="filtrar">🎯 Filtrar y añadir canciones</button>
+      <button id="borrar">🗑️ Borrar todas las canciones</button>
+    </div>
+
+    <div id="loading" class="loading hidden">⏳ Procesando...</div>
+  </main>
+
+  <script src="script.js"></script>
+</body>
+</html>

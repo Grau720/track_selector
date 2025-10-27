@@ -1,0 +1,10 @@
+# Archivo: .env
+# ----------------------------------------------------
+# Credenciales de tu aplicación de Spotify
+# Reemplaza los valores de ejemplo con tus datos reales
+# ----------------------------------------------------
+
+SPOTIFY_CLIENT_ID="61f8b91c159a4e1590d083bf95049363"
+SPOTIFY_CLIENT_SECRET="d2127c9e434042d0a2deaadd82d65056"
+REDIRECT_URI="http://localhost:8888/callback"
+PORT=8888

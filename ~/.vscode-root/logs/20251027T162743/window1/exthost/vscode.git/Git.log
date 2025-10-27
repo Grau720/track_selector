@@ -1,0 +1,50 @@
+2025-10-27 16:28:01.996 [info] [main] Log level: Info
+2025-10-27 16:28:01.996 [info] [main] Validating found git in: "git"
+2025-10-27 16:28:01.996 [info] [main] Using git "2.51.0" from "git"
+2025-10-27 16:28:01.996 [info] [Model][doInitialScan] Initial repository scan started
+2025-10-27 16:28:01.996 [info] > git rev-parse --show-toplevel [116ms]
+2025-10-27 16:28:01.996 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:28:02.033 [info] > git rev-parse --show-toplevel [571ms]
+2025-10-27 16:28:02.033 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:28:02.310 [info] > git rev-parse --show-toplevel [152ms]
+2025-10-27 16:28:02.311 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:28:02.511 [info] > git rev-parse --show-toplevel [95ms]
+2025-10-27 16:28:02.512 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:28:02.512 [info] [Model][doInitialScan] Initial repository scan completed - repositories (0), closed repositories (0), parent repositories (0), unsafe repositories (0)
+2025-10-27 16:38:40.907 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/.superagent-vPY16Fct/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/.superagent-vPY16Fct/'
+2025-10-27 16:38:40.918 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/.has-tostringtag-kZl9hUdS/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/.has-tostringtag-kZl9hUdS/'
+2025-10-27 16:38:43.352 [info] > git rev-parse --show-toplevel [4ms]
+2025-10-27 16:38:43.352 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:38:43.361 [info] > git rev-parse --show-toplevel [3ms]
+2025-10-27 16:38:43.361 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:38:54.685 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/superagent/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/superagent/'
+2025-10-27 16:38:54.697 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/has-tostringtag/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/has-tostringtag/'
+2025-10-27 16:38:56.026 [info] > git rev-parse --show-toplevel [1ms]
+2025-10-27 16:38:56.027 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:38:56.037 [info] > git rev-parse --show-toplevel [3ms]
+2025-10-27 16:38:56.037 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:40:22.009 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/.superagent-vPY16Fct/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/.superagent-vPY16Fct/'
+2025-10-27 16:40:22.019 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/superagent/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/superagent/'
+2025-10-27 16:40:22.035 [warning] [Model][getRepositoryExact] Failed to get repository realpath for: "/home/pablo/Escritorio/_track_selection/node_modules/has-tostringtag/". Error:Error: ENOENT: no such file or directory, realpath '/home/pablo/Escritorio/_track_selection/node_modules/has-tostringtag/'
+2025-10-27 16:40:26.842 [info] > git rev-parse --show-toplevel [61ms]
+2025-10-27 16:40:26.843 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:40:27.361 [info] > git rev-parse --show-toplevel [1ms]
+2025-10-27 16:40:27.362 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 16:40:27.374 [info] > git rev-parse --show-toplevel [6ms]
+2025-10-27 16:40:27.374 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:00:48.416 [info] > git rev-parse --show-toplevel [153ms]
+2025-10-27 17:00:48.430 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:01:21.055 [info] > git rev-parse --show-toplevel [52ms]
+2025-10-27 17:01:21.055 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:04:50.365 [info] > git rev-parse --show-toplevel [2ms]
+2025-10-27 17:04:50.365 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:05:55.850 [info] > git rev-parse --show-toplevel [7ms]
+2025-10-27 17:05:55.851 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:06:02.289 [info] > git rev-parse --show-toplevel [10ms]
+2025-10-27 17:06:02.289 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:06:03.342 [info] > git rev-parse --show-toplevel [35ms]
+2025-10-27 17:06:03.348 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:06:04.550 [info] > git rev-parse --show-toplevel [1ms]
+2025-10-27 17:06:04.551 [info] fatal: not a git repository (or any of the parent directories): .git
+2025-10-27 17:06:43.074 [info] > git rev-parse --show-toplevel [28ms]
+2025-10-27 17:06:43.074 [info] fatal: not a git repository (or any of the parent directories): .git
