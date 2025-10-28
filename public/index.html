@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FilterFlow - Spotify Automation</title>
     <style>
+        /* (TU CSS COMPLETO PERMANECE SIN CAMBIOS AQUÍ) */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         
         :root {
@@ -265,6 +266,12 @@
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+        }
+
+        .btn-lg {
+            padding: 1rem 2rem;
+            font-size: 1.125rem;
+            font-weight: 600;
         }
         
         /* Input */
@@ -687,6 +694,33 @@
         .hidden {
             display: none !important;
         }
+
+        /* --- NUEVOS ESTILOS PARA EL PORTAL DE LOGIN --- */
+        .login-portal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .login-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 3rem 2rem;
+            max-width: 400px;
+            width: 90%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 10px 30px var(--shadow);
+        }
         
         /* Responsive */
         @media (max-width: 768px) {
@@ -750,6 +784,10 @@
             .toast {
                 min-width: auto;
             }
+            
+            .login-card {
+                padding: 2rem 1rem;
+            }
         }
     </style>
     </head>
@@ -769,6 +807,9 @@
             </div>
             <button class="theme-toggle" id="theme-toggle" title="Cambiar tema">
                 <span id="theme-icon">🌙</span>
+            </button>
+            <button id="logout-btn" class="btn btn-secondary btn-sm" title="Cerrar sesión">
+                🚪 Salir
             </button>
         </div>
     </header>
@@ -836,7 +877,7 @@
             
             <div class="card">
                 <div class="card-header">
-                    <h3 class="card-title">3. Artistas Favoritos (Sugerencias Base)</h3>
+                    <h3 class="card-title">3. Artistas extra para filtrar</h3>
                 </div>
                 <input type="text" id="favorite-artist-search" class="input" placeholder="Buscar artista en Spotify..." autocomplete="off">
                 <div id="favorite-search-results" style="margin-top: 0.5rem; position: relative;">
@@ -885,14 +926,34 @@
         <button id="run-filter-btn" class="btn btn-primary">
             ▶️ Filtrar y Añadir a Playlist
         </button>
+
+        <!-- Contenedor de progreso -->
+        <div id="progress-container" class="hidden">
+            <div class="progress-wrapper">
+            <div id="progress-bar"></div>
+            </div>
+            <span id="progress-text">Preparando...</span>
+        </div>
     </div>
-    
+
+    <div id="login-portal" class="login-portal hidden">
+        <div class="login-card">
+            <div class="logo" style="font-size: 2.5rem; margin-bottom: 1rem;">FilterFlow</div>
+            <p style="color: var(--text-secondary); margin-bottom: 2rem; text-align: center;">
+                Automatiza tu curación de playlists de Spotify basada en géneros y artistas.
+            </p>
+            <button id="login-spotify-btn" class="btn btn-primary btn-lg">
+                <span style="font-size: 1.5rem;">&#x266B;</span>
+                Iniciar Sesión con Spotify
+            </button>
+            <small style="margin-top: 1.5rem; color: var(--text-secondary);">
+                Necesitamos acceso para leer tus artistas seguidos y modificar tu playlist.
+            </small>
+        </div>
+    </div>
     <script src="script.js"></script>
     <script>
-        // Lógica de Theme Toggle y Tab Navigation (tal como la tenías)
-        // ... (Tu código existente aquí) ...
-        
-        // Theme Toggle
+        // Lógica de Theme Toggle
         const themeToggle = document.getElementById('theme-toggle');
         const themeIcon = document.getElementById('theme-icon');
         const body = document.body;
@@ -924,34 +985,13 @@
                     content.classList.remove('active');
                 });
                 document.getElementById(tab).classList.add('active');
-                
-                // Cargar datos SOLO cuando se accede a la pestaña
-                if (tab === 'history') {
-                    // loadAndRenderHistory(); // Asumo que tienes esta función
-                } else if (tab === 'config') {
-                    // updateFilteredArtists(); // Asumo que tienes esta función
-                }
             });
         });
         
-        // Genre dropdown toggle
-        const addGenreBtn = document.getElementById('add-genre-btn');
-        const genreDropdown = document.getElementById('all-genres');
-        
-        addGenreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            genreDropdown.classList.toggle('hidden');
+        // 3. NEW: Event Listener para el botón de Login
+        document.getElementById('login-spotify-btn').addEventListener('click', () => {
+            window.location.href = '/login'; 
         });
-        
-        // Close dropdown when clicking outside
-        document.addEventListener('click', (e) => {
-            if (!genreDropdown.contains(e.target) && e.target !== addGenreBtn) {
-                genreDropdown.classList.add('hidden');
-            }
-        });
-        
-        // Eliminación de la lógica de playlist-search innecesaria, ya usamos select y botones.
-        // La gestión de los formularios de playlist se hará en script.js
     </script>
 </body>
 </html>

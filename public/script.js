@@ -79,43 +79,71 @@ function showToast(message, type = 'success') {
 // ----------------------------------------
 
 document.addEventListener('DOMContentLoaded', async () => {
-    setLoading(true, 'Cargando configuración...');
+    // Escondemos el contenido principal por defecto hasta que sepamos si hay sesión
+    const loginPortal = document.getElementById('login-portal');
+    const mainContent = document.body.querySelectorAll('header, nav, .container, .action-bar');
+    const spotifyUserIdElement = document.getElementById('spotify-user-id');
+    
+    function setLoginState(isLoggedIn) {
+        if (isLoggedIn) {
+            loginPortal.classList.add('hidden');
+            mainContent.forEach(el => el.classList.remove('hidden'));
+        } else {
+            loginPortal.classList.remove('hidden');
+            mainContent.forEach(el => el.classList.add('hidden'));
+            spotifyUserIdElement.textContent = 'No autenticado';
+        }
+    }
+
+    setLoading(true, 'Comprobando sesión...');
   
     try {
-      // 1. Solo cargar configuración básica
+      // 1. Cargar configuración básica (y comprobar sesión)
       const cfgRes = await fetch('/config');
+      
       if (!cfgRes.ok) {
+          const errData = await cfgRes.json().catch(() => ({ error: 'Error desconocido' }));
+
           if (cfgRes.status === 401) {
+              // Si el middleware falla el refresh O no hay cookies.
+              if (errData.error.includes('No user') || errData.error.includes('expirado')) {
+                  console.log('Sesión no válida/expirada. Mostrando portal de login.');
+                  setLoginState(false);
+                  setLoading(false);
+                  return; // Detener la ejecución del script principal
+              }
+              // En otros casos 401 que el middleware no manejó bien, forzamos login
               window.location.href = '/login';
               return;
           }
-          throw new Error('No se pudo cargar la configuración');
+          throw new Error(`Error ${cfgRes.status}: No se pudo cargar la configuración`);
       }
       
+      // Si la respuesta fue OK (200)
+      setLoginState(true); 
       const loadedConfig = await cfgRes.json();
       config = { ...config, ...loadedConfig }; 
-
+      
+      // Asegurar arrays
       if (!config.generos) config.generos = [];
       if (!config.excludedArtists) config.excludedArtists = [];
       if (!config.favoriteArtists) config.favoriteArtists = [];
       
-      // 2. Obtener usuario
+      // 2. Obtener usuario (de la cookie, ahora que sabemos que la sesión es válida)
       userId = getCookie('spotify_user_id') || 'No disponible';
-      document.getElementById('spotify-user-id').textContent = userId;
+      spotifyUserIdElement.textContent = userId;
       
       // 3. Cargar géneros (ligero)
       const genresRes = await fetch('/generos');
       if (!genresRes.ok) throw new Error('No se pudo cargar géneros');
       allGenres = await genresRes.json();
       
-      // 4. Solo renderizar lo que ya tenemos guardado
+      // 4. Renderizar UI
       renderSelectedGenres();
       renderAllGenresList();
       
-      // 5. Cargar playlists
+      // 5. Cargar datos asíncronos
       loadPlaylists().catch(err => console.error('Error cargando playlists:', err));
-      
-      // 6. Cargar favoritos
       loadFavoriteArtists().catch(err => console.error('Error cargando favoritos:', err));
 
       if (config.generos && config.generos.length > 0) {
@@ -125,25 +153,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
       console.error('Error cargando:', err);
       showToast(`Error al cargar: ${err.message}`, 'error');
+      // Si falla después de la comprobación 401, asumimos que la UI debe seguir visible
+      setLoginState(true); 
     } finally {
       setLoading(false);
     }
   
-    // --- EVENT LISTENERS ---
+    // ------------------------------------
+    // --- INICIO DE EVENT LISTENERS ---
+    // ------------------------------------
   
+    // Listener para el botón de añadir géneros
     document.getElementById('add-genre-btn').addEventListener('click', (e) => { 
-      e.stopPropagation(); 
-      document.getElementById('all-genres').classList.toggle('hidden');
+        e.stopPropagation(); 
+        document.getElementById('all-genres').classList.toggle('hidden');
     });
   
+    // Búsqueda de géneros
     document.getElementById('genre-search').addEventListener('input', (e) => {
       renderAllGenresList(e.target.value);
     });
     
-    // LISTENERS DE PLAYLIST ACTUALIZADOS 🎧
+    // Cerrar dropdown de géneros al hacer clic fuera
+    document.addEventListener('click', (e) => {
+        const genreDropdown = document.getElementById('all-genres');
+        const addGenreBtn = document.getElementById('add-genre-btn');
+        
+        if (!genreDropdown.contains(e.target) && e.target !== addGenreBtn) {
+            genreDropdown.classList.add('hidden');
+        }
+    });
+    
+    // LISTENERS DE PLAYLIST 🎧
     const playlistSelector = document.getElementById('destination-playlist');
     const createPlaylistBtn = document.getElementById('create-playlist-btn');
-    const emptyPlaylistBtnCard = document.getElementById('empty-playlist-btn-card'); // FIX: ID corregido
+    const emptyPlaylistBtnCard = document.getElementById('empty-playlist-btn-card');
     const newPlaylistForm = document.getElementById('new-playlist-form');
     const confirmCreatePlaylistBtn = document.getElementById('confirm-create-playlist-btn');
     const cancelCreatePlaylistBtn = document.getElementById('cancel-create-playlist-btn');
@@ -155,7 +199,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             config.playlistId = playlistId;
             await saveConfig();
             renderSelectedPlaylistDisplay(); 
-            showToast('Playlist de destino guardada.', 'info');
+            showToast('Playlist de destino guardada.', 'success');
         }
     });
 
@@ -172,7 +216,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     confirmCreatePlaylistBtn.addEventListener('click', createNewPlaylist);
 
     // 3. Vaciar Playlist
-    emptyPlaylistBtnCard.addEventListener('click', vaciarPlaylist); // FIX: ID corregido
+    emptyPlaylistBtnCard.addEventListener('click', vaciarPlaylist);
     
     // Lógica de Artistas Favoritos (Búsqueda)
     let searchTimeout;
@@ -181,13 +225,29 @@ document.addEventListener('DOMContentLoaded', async () => {
         searchTimeout = setTimeout(() => searchArtist(e.target.value), 500);
     });
     
+    document.getElementById('favorite-artist-search').addEventListener('blur', () => {
+        // Ocultar resultados de búsqueda después de un breve retraso
+        setTimeout(() => {
+            const results = document.getElementById('favorite-search-results');
+            if (results) results.innerHTML = '';
+        }, 200);
+    });
+    
     // Navegación de pestañas para cargar datos
     document.querySelectorAll('.nav-btn').forEach(btn => {
         btn.addEventListener('click', () => {
             const tab = btn.dataset.tab;
             
-            // Lógica de tab navigation (ocultar/mostrar)
-
+            // Actualizar navegación
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            
+            // Actualizar contenido
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(tab).classList.add('active');
+            
             // Cargar datos SOLO cuando se accede a la pestaña
             if (tab === 'history') {
                 loadAndRenderHistory();
@@ -200,7 +260,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Solo cargar recomendados cuando el usuario haga click
     document.getElementById('refresh-recommended-btn').addEventListener('click', loadAndRenderRecommendedArtists);
 
+    // Botón principal de filtrar y añadir
     document.getElementById('run-filter-btn').addEventListener('click', filtrarYAnadir);
+    // Botón de Logout
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+        if (!confirm('¿Seguro que quieres cerrar sesión?')) return;
+
+        try {
+            setLoading(true, 'Cerrando sesión...');
+            await fetch('/logout', { method: 'GET' });
+            showToast('Sesión cerrada correctamente', 'success');
+            setTimeout(() => window.location.reload(), 1000);
+        } catch (err) {
+            console.error('Error al cerrar sesión:', err);
+            showToast('Error al cerrar sesión', 'error');
+        } finally {
+            setLoading(false);
+        }
+    });
 });
 
 // ----------------------------------------
@@ -242,27 +319,43 @@ function renderAllGenresList(filter = '') {
     cont.innerHTML = '';
     const lowerFilter = filter.toLowerCase();
     
-    allGenres
-      .filter(g => g.toLowerCase().includes(lowerFilter))
-      .forEach(g => {
+    const filteredGenres = allGenres.filter(g => g.toLowerCase().includes(lowerFilter));
+
+    if (filteredGenres.length === 0 && filter) {
+        cont.innerHTML = `<div class="dropdown-item" style="color: var(--text-secondary);">No hay resultados.</div>`;
+        return;
+    }
+
+    filteredGenres.forEach(g => {
         const el = document.createElement('div');
         el.className = 'dropdown-item';
         el.textContent = g;
         
+        // Marcar como seleccionado si ya está en la configuración
         if (config.generos.includes(g)) {
           el.classList.add('selected');
         }
         
         el.onclick = () => {
           if (!config.generos.includes(g)) {
+            // Añadir
             config.generos.push(g);
             el.classList.add('selected');
           } else {
+            // Eliminar
             config.generos = config.generos.filter(gen => gen !== g);
             el.classList.remove('selected');
           }
-          saveConfigAndUpdateArtists();
-          loadAndRenderRecommendedArtists();
+          
+          // Renderizar los chips de géneros seleccionados y guardar
+          renderSelectedGenres(); 
+          
+          // Re-renderizar la lista de todos los géneros para actualizar su estado 'selected'
+          renderAllGenresList(filter);
+          
+          // Guardar y actualizar las listas de artistas
+          saveConfigAndUpdateArtists(); 
+          
         };
         cont.appendChild(el);
       });
@@ -334,12 +427,7 @@ function renderSelectedPlaylistDisplay() {
         infoDiv.innerHTML = '';
     }
 }
-  
-/**
- * Renderiza la lista desplegable de playlists según el filtro y el estado de foco del input.
- * El HTML final usa un <select>, esta función se adapta a la nueva estructura.
- * Esta versión se simplifica solo para asegurar que el select esté lleno.
- */
+
 function renderPlaylistResults() {
       const selector = document.getElementById('destination-playlist');
       selector.innerHTML = '<option value="" disabled selected>-- Selecciona una Playlist --</option>';
@@ -488,9 +576,6 @@ async function loadFavoriteArtists() {
     }
 }
 
-/**
- * Llama al backend para eliminar un artista de la lista de favoritos y actualiza el DOM.
- */
 async function removeFavoriteArtist(artistId, chipElement) {
     try {
         const res = await fetch(`/favorite-artists/remove`, {
@@ -857,14 +942,19 @@ async function updateFilteredArtists() {
     }
 }
   
+// Añadir en la sección de UTILIDADES o PERSISTENCIA
 async function saveConfigAndUpdateArtists() {
     await saveConfig();
-    renderSelectedGenres();
     
-    // Solo actualizar artistas si estamos en la pestaña de Configuración
-    const configTab = document.getElementById('config');
-    if (configTab.classList.contains('active')) {
-        await updateFilteredArtists();
+    // Solo recarga los recomendados si se añadió un género
+    if (config.generos && config.generos.length > 0) {
+        // Carga forzada para asegurar que se actualicen las sugerencias
+        loadAndRenderRecommendedArtists(true); 
+    }
+    
+    // Opcional: Actualizar la lista filtrada si el usuario está en la pestaña de configuración
+    if (document.getElementById('config').classList.contains('active')) {
+         updateFilteredArtists();
     }
 }
   
@@ -924,100 +1014,185 @@ async function excludeArtist(artist, listItem) {
       }
     }
 }
+
+function showProgress() {
+  const btn = document.getElementById('run-filter-btn');
+  const progressContainer = document.getElementById('progress-container');
+  const progressBar = document.getElementById('progress-bar');
+  const progressText = document.getElementById('progress-text');
+
+  btn.classList.add('hidden');
+  progressContainer.classList.remove('hidden');
+
+  // Muestra al menos un inicio visible
+  progressBar.style.width = '10%';
+  progressText.textContent = 'Preparando...';
+}
+
+function updateProgress(percent, text) {
+  const bar = document.getElementById('progress-bar');
+  const label = document.getElementById('progress-text');
+  
+  bar.style.width = `${Math.max(1, percent)}%`;
+  if (text) label.textContent = text;
+}
+
+function hideProgress() {
+  const btn = document.getElementById('run-filter-btn');
+  const progressContainer = document.getElementById('progress-container');
+  const bar = document.getElementById('progress-bar');
+  const label = document.getElementById('progress-text');
+
+  btn.classList.remove('hidden');
+  progressContainer.classList.add('hidden');
+  bar.style.width = '0%';
+  label.textContent = '';
+}
   
 // ----------------------------------------
 // --- ACCIONES DE BOTONES PRINCIPALES ---
 // ----------------------------------------
 
 async function filtrarYAnadir() {
+  try {
+    // --- Mostrar barra de progreso ---
+    showProgress();
+    updateProgress(5, 'Preparando filtros...');
+    await new Promise(r => setTimeout(r, 150)); // pequeño delay visual
+
+    // --- Validaciones previas ---
     if (!config.playlistId) {
       showToast('Debes seleccionar una playlist de destino primero', 'error');
+      hideProgress();
       return;
     }
+
     if ((!config.generos || config.generos.length === 0) && config.favoriteArtists.length === 0) {
       showToast('Debes seleccionar al menos un género o añadir artistas favoritos', 'warning');
+      hideProgress();
       return;
     }
-  
-    setLoading(true, 'Filtrando y añadiendo canciones...');
-  
-    try {
-      const res = await fetch('/filtrar-y-anadir', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          generos: config.generos, 
-          playlistId: config.playlistId,
-          excludedArtists: config.excludedArtists || [] 
-        })
-      });
-      
-      if (res.status === 401) {
-          const errData = await res.json();
-          throw new Error(errData.error);
-      }
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error en el servidor');
-      }
-      
-      const data = await res.json();
-      
-      if (data.errors && data.errors.length > 0) {
-        const uniqueArtists = Array.from(new Set(data.errors.map(e => e.artistName))).slice(0, 3).join(', ');
-        showToast(`${data.message}<br><small>Algunos artistas fallaron: ${uniqueArtists}...</small>`, data.addedCount > 0 ? 'warning' : 'error');
-      } else {
-        showToast(data.message, 'success');
-      }
-      
-      await loadAndRenderHistory(); 
-      await loadPlaylists(); 
-  
-    } catch (err) {
-      console.error('Error al filtrar:', err);
-      showToast(`Error al filtrar: ${err.message}`, 'error');
-    } finally {
-      setLoading(false);
+
+    updateProgress(15, 'Enviando datos al servidor...');
+    await new Promise(r => setTimeout(r, 100));
+
+    // --- Llamada al backend ---
+    const res = await fetch('/filtrar-y-anadir', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generos: config.generos,
+        playlistId: config.playlistId,
+        excludedArtists: config.excludedArtists || []
+      })
+    });
+
+    updateProgress(40, 'Procesando respuesta...');
+    await new Promise(r => setTimeout(r, 100));
+
+    // --- Manejo de errores ---
+    if (res.status === 401) {
+      const errData = await res.json();
+      throw new Error(errData.error);
     }
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Error en el servidor');
+    }
+
+    // --- Datos correctos ---
+    const data = await res.json();
+    updateProgress(70, 'Actualizando interfaz...');
+    await new Promise(r => setTimeout(r, 200));
+
+    if (data.errors && data.errors.length > 0) {
+      const uniqueArtists = Array.from(new Set(data.errors.map(e => e.artistName)))
+        .slice(0, 3)
+        .join(', ');
+      showToast(
+        `${data.message}<br><small>Algunos artistas fallaron: ${uniqueArtists}...</small>`,
+        data.addedCount > 0 ? 'warning' : 'error'
+      );
+    } else {
+      showToast(data.message, 'success');
+    }
+
+    updateProgress(85, 'Refrescando historial...');
+    await loadAndRenderHistory();
+
+    updateProgress(95, 'Actualizando playlists...');
+    await loadPlaylists();
+
+    updateProgress(100, 'Completado ✅');
+    await new Promise(r => setTimeout(r, 600)); // deja ver el 100 % por un momento
+
+  } catch (err) {
+    console.error('Error al filtrar:', err);
+    updateProgress(100, 'Error durante el proceso');
+    showToast(`Error al filtrar: ${err.message}`, 'error');
+  } finally {
+    // --- Ocultar barra ---
+    setTimeout(() => {
+      hideProgress();
+      setLoading(false);
+    }, 800);
+  }
 }
   
 async function vaciarPlaylist() {
-    if (!config.playlistId) {
-      showToast('Debes seleccionar una playlist para vaciar', 'error');
-      return;
+  // --- Validación inicial ---
+  if (!config.playlistId) {
+    showToast('Debes seleccionar una playlist para vaciar', 'error');
+    return;
+  }
+
+  const selectedPlaylist = allPlaylists.find(p => p.id === config.playlistId);
+  const playlistName = selectedPlaylist ? selectedPlaylist.name : 'la playlist seleccionada';
+
+  if (!confirm(`¿Estás seguro de que quieres eliminar TODAS las canciones de "${playlistName}"?`)) {
+    return;
+  }
+
+  // --- Mostrar barra de progreso y loading overlay ---
+  showProgress();
+  updateProgress(5, 'Preparando limpieza...');
+  setLoading(true, 'Vaciando playlist...');
+
+  try {
+    updateProgress(15, 'Conectando con el servidor...');
+
+    const res = await fetch('/vaciar-playlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ playlistId: config.playlistId })
+    });
+
+    updateProgress(50, 'Eliminando canciones...');
+
+    if (res.status === 401) {
+      const errData = await res.json();
+      throw new Error(errData.error);
     }
-    
-    const selectedPlaylist = allPlaylists.find(p => p.id === config.playlistId);
-    const playlistName = selectedPlaylist ? selectedPlaylist.name : 'la playlist seleccionada';
-    
-    if (!confirm(`¿Estás seguro de que quieres eliminar TODAS las canciones de "${playlistName}"?`)) {
-      return;
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Error en el servidor');
     }
-  
-    setLoading(true, 'Vaciando playlist...');
-    try {
-      const res = await fetch('/vaciar-playlist', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlistId: config.playlistId })
-      });
-      
-      if (res.status === 401) {
-          const errData = await res.json();
-          throw new Error(errData.error);
-      }
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.error || 'Error en el servidor');
-      }
-      
-      const data = await res.json();
-      showToast(data.message, 'success');
-      await loadPlaylists(); 
-    } catch (err) {
-      console.error('Error vaciando:', err);
-      showToast(`Error al vaciar: ${err.message}`, 'error');
-    } finally {
-      setLoading(false);
-    }
+
+    const data = await res.json();
+    updateProgress(85, 'Actualizando playlists...');
+
+    showToast(data.message, 'success');
+    await loadPlaylists();
+
+    updateProgress(100, 'Completado ✅');
+  } catch (err) {
+    console.error('Error vaciando:', err);
+    updateProgress(100, 'Error durante el proceso');
+    showToast(`Error al vaciar: ${err.message}`, 'error');
+  } finally {
+    setLoading(false);
+    // Oculta la barra tras breve retardo
+    setTimeout(hideProgress, 1500);
+  }
 }

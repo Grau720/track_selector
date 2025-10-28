@@ -8,16 +8,32 @@ const path = require('path');
 
 // 💡 NUEVO: Importar funciones de tokens para persistencia multiusuario
 const { saveUserTokens } = require('./tokens'); 
+const winston = require('winston');
 
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'logs/combined.log' })
+  ],
+});
+
+if (process.env.NODE_ENV !== 'production') {
+  logger.add(new winston.transports.Console({
+    format: winston.format.simple(),
+  }));
+}
+
+module.exports = logger;
 const app = express();
+
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.static('public')); 
-
-// 🛑 ELIMINADAS: Estas variables globales ya NO se usan para tokens de usuario.
-// let currentAccessToken = null;
-// let currentUserId = null; 
-// let currentRefreshToken = null;
 
 const CONFIG_PATH = path.join(__dirname, 'configs.json');
 const HISTORY_PATH = path.join(__dirname, 'history.json');
@@ -93,6 +109,32 @@ const spotifyApi = new SpotifyWebApi({
     clientSecret: clientSecret, 
     redirectUri: redirectUri 
 });
+
+// =========================================
+// --- GESTOR DE INSTANCIAS POR USUARIO ---
+// =========================================
+const userSpotifyClients = new Map();
+
+function getSpotifyClientForUser(userId, accessToken, refreshToken) {
+    if (!userSpotifyClients.has(userId)) {
+        const client = new SpotifyWebApi({
+            clientId,
+            clientSecret,
+            redirectUri
+        });
+        client.setAccessToken(accessToken);
+        client.setRefreshToken(refreshToken);
+        userSpotifyClients.set(userId, client);
+        console.log(`🎧 Nueva instancia Spotify creada para usuario ${userId}`);
+        return client;
+    } else {
+        const existingClient = userSpotifyClients.get(userId);
+        existingClient.setAccessToken(accessToken);
+        existingClient.setRefreshToken(refreshToken);
+        return existingClient;
+    }
+}
+
 
 // Opciones de Cookies para garantizar la estabilidad y seguridad
 const COOKIE_OPTIONS = {
@@ -201,6 +243,19 @@ function delay(ms) {
   return new Promise(res => setTimeout(res, ms));
 }
 
+const RATE_LIMIT_MS = 200; // 5 peticiones por segundo
+let lastCall = 0;
+
+async function withRateLimit(fn) {
+    const now = Date.now();
+    const diff = now - lastCall;
+    if (diff < RATE_LIMIT_MS) {
+        await delay(RATE_LIMIT_MS - diff);
+    }
+    lastCall = Date.now();
+    return fn();
+}
+
 function findExternalLinks(title, artist, isrc) {
     const query = encodeURIComponent(`${title} ${artist}`);
     
@@ -216,11 +271,9 @@ function findExternalLinks(title, artist, isrc) {
 // --- Endpoints Públicos (Login y Servidor) ---
 // ----------------------------------------
 // index.js (Endpoint /)
-app.get('/', async (req, res) => {
-    // Si el middleware borró las cookies (por refresh fallido) o no existen, redirigir.
-    if (!req.cookies?.spotify_access_token) {
-        return res.redirect('/login');
-    }
+app.get('/', (req, res) => {
+    // 🛑 CAMBIO CLAVE: SIEMPRE enviamos el HTML. 
+    // La comprobación de la sesión ahora la hace el JS del Frontend al llamar a /config.
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
@@ -278,6 +331,20 @@ app.get('/callback', async (req, res) => {
   }
 });
 
+app.get('/logout', (req, res) => {
+  const userId = req.cookies?.spotify_user_id;
+  if (userId) {
+    userSpotifyClients.delete(userId);
+    console.log(`👋 Sesión cerrada para usuario ${userId}`);
+  }
+
+  // Limpiar cookies
+  res.clearCookie('spotify_access_token', COOKIE_OPTIONS);
+  res.clearCookie('spotify_refresh_token', COOKIE_OPTIONS);
+  res.clearCookie('spotify_user_id', COOKIE_OPTIONS);
+
+  res.redirect('/');
+});
 
 // ----------------------------------------
 // --- Endpoints de Configuración y Datos (AJUSTADOS) ---
@@ -480,7 +547,7 @@ app.get('/api/recommended-artists', standardApiWrapper(async (req, res) => {
             const opts = { limit: 50 };
             if (after) opts.after = after;
             
-            const data = await retryApiCall(() => spotifyApi.getFollowedArtists(opts));
+            const data = await withRateLimit(() => spotifyApi.getFollowedArtists(opts));
             const artists = data.body.artists.items;
 
             artists.forEach(artist => {
@@ -526,7 +593,7 @@ app.get('/api/recommended-artists', standardApiWrapper(async (req, res) => {
             const batch = myArtistsArray.slice(i, i + 50);
             
             try {
-                const artistsData = await retryApiCall(() => spotifyApi.getArtists(batch));
+                const artistsData = await withRateLimit(() => spotifyApi.getArtists(batch));
                 
                 artistsData.body.artists.forEach(artist => {
                     if (artist && artist.id) {
@@ -572,9 +639,8 @@ app.get('/api/recommended-artists', standardApiWrapper(async (req, res) => {
         for (const seedArtist of topSeedArtists) {
             try {
                 // 🔥 USAR 'from_token' para el mercado del usuario
-                const topTracks = await retryApiCall(
-                    () => spotifyApi.getArtistTopTracks(seedArtist.id, 'from_token')
-                );
+                const topTracks = await withRateLimit(() => spotifyApi.getArtistTopTracks(seedArtist.id, 'from_token'));
+
                 
                 // Procesar cada track
                 topTracks.body.tracks.forEach(track => {
@@ -629,7 +695,7 @@ app.get('/api/recommended-artists', standardApiWrapper(async (req, res) => {
             const batch = collaboratorIds.slice(i, i + 50);
             
             try {
-                const artistsData = await retryApiCall(() => spotifyApi.getArtists(batch));
+                const artistsData = await withRateLimit(() => spotifyApi.getArtists(batch));
                 
                 artistsData.body.artists.forEach(artist => {
                     if (!artist || !artist.id) return;
@@ -794,7 +860,7 @@ app.post('/vaciar-playlist', standardApiWrapper(async (req, res) => {
     let offset = 0;
     
     while (true) {
-        const data = await spotifyApi.getPlaylistTracks(playlistId, { offset, limit: 100 });
+        const data = await withRateLimit(() => spotifyApi.getPlaylistTracks(playlistId, { offset, limit: 100 }));
         data.body.items.forEach(item => {
             if (item.track && item.track.uri) {
                 tracksToRemove.push({ uri: item.track.uri });
@@ -811,7 +877,7 @@ app.post('/vaciar-playlist', standardApiWrapper(async (req, res) => {
     const batchSize = 100;
     for (let i = 0; i < tracksToRemove.length; i += batchSize) {
         const batch = tracksToRemove.slice(i, i + batchSize);
-        await spotifyApi.removeTracksFromPlaylist(playlistId, batch);
+        await withRateLimit(() => spotifyApi.removeTracksFromPlaylist(playlistId, batch));
         await delay(100); 
     }
 
@@ -840,7 +906,7 @@ app.post('/filtrar-y-anadir', standardApiWrapper(async (req, res) => {
     while (true) {
       const opts = { limit: 50 };
       if (after) opts.after = after;
-      const data = await spotifyApi.getFollowedArtists(opts);
+      const data = await withRateLimit(() => spotifyApi.getFollowedArtists(opts));
       const artists = data.body.artists.items;
       artists.forEach(a => {
         if (a.genres.some(g => generos.includes(g)) && !excludedArtists.includes(a.id)) {
@@ -892,14 +958,14 @@ app.post('/filtrar-y-anadir', standardApiWrapper(async (req, res) => {
                      { name: `ID: ${id}` };
 
       try {
-        const releases = await spotifyApi.getArtistAlbums(id, { limit: 50, include_groups: 'single,album' });
+        const releases = await withRateLimit(() => spotifyApi.getArtistAlbums(id, { limit: 50, include_groups: 'single,album' }));
         
         for (const album of releases.body.items) {
           const date = new Date(album.release_date);
           
           if (date.getTime() >= thisWeek) { // Filtro temporal de 90 días
             
-            const tracks = await spotifyApi.getAlbumTracks(album.id);
+            const tracks = await withRateLimit(() => spotifyApi.getAlbumTracks(album.id));
             
             for (const t of tracks.body.items) {
               if (t.uri && !existingTracks.has(t.uri)) {
@@ -932,7 +998,7 @@ app.post('/filtrar-y-anadir', standardApiWrapper(async (req, res) => {
         const batchIds = allTrackIds.slice(i, i + detailBatchSize);
         
         try {
-            const detailData = await spotifyApi.getTracks(batchIds); 
+            const detailData = await withRateLimit(() => spotifyApi.getTracks(batchIds));
             
             detailData.body.tracks.forEach(fullTrack => {
                 if (fullTrack && fullTrack.uri) {
@@ -965,7 +1031,7 @@ app.post('/filtrar-y-anadir', standardApiWrapper(async (req, res) => {
     for (let i = 0; i < uris.length; i += batchSize) {
       const batch = uris.slice(i, i + batchSize);
       try {
-        await spotifyApi.addTracksToPlaylist(playlistId, batch);
+        await withRateLimit(() => spotifyApi.addTracksToPlaylist(playlistId, batch));
         addedCount += batch.length;
       } catch (e) {
         if (e.statusCode === 429) {
@@ -1014,7 +1080,7 @@ app.post('/artistas-filtrados', standardApiWrapper(async (req, res) => {
     while (true) {
         const opts = { limit: 50 };
         if (after) opts.after = after;
-        const data = await spotifyApi.getFollowedArtists(opts);
+        const data = await withRateLimit(() => spotifyApi.getFollowedArtists(opts));
         const artists = data.body.artists.items;
         
         artists.forEach(a => {
@@ -1061,7 +1127,7 @@ app.post('/excluir-artista', standardApiWrapper(async (req, res) => {
     let tracksToRemove = [];
     let offset = 0;
     while (true) {
-        const data = await spotifyApi.getPlaylistTracks(playlistId, { offset, limit: 100 });
+        const data = await withRateLimit(() => spotifyApi.getPlaylistTracks(playlistId, { offset, limit: 100 }));
         data.body.items.forEach(item => {
             if (item.track && item.track.artists.some(a => a.id === artistId)) {
                 tracksToRemove.push({ uri: item.track.uri });
@@ -1075,7 +1141,7 @@ app.post('/excluir-artista', standardApiWrapper(async (req, res) => {
         const batchSize = 100;
         for (let i = 0; i < tracksToRemove.length; i += batchSize) {
             const batch = tracksToRemove.slice(i, i + batchSize);
-            await spotifyApi.removeTracksFromPlaylist(playlistId, batch);
+            await withRateLimit(() => spotifyApi.removeTracksFromPlaylist(playlistId, batch));
             await delay(100); 
         }
         res.json({ success: true, message: `✅ Artista excluido y eliminadas ${tracksToRemove.length} canciones suyas de la playlist.` });
