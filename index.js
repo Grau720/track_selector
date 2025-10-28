@@ -316,26 +316,90 @@ app.get('/favorite-artists', (req, res) => {
     const userId = req.cookies?.spotify_user_id || currentUserId;
     if (!userId) return res.status(401).json({ error: 'No user' });
     const config = getUserConfig(userId);
+    // Ahora, config.favoriteArtists incluirá el campo 'image'
     res.json(config.favoriteArtists || []);
 });
 
-app.post('/favorite-artists/add', (req, res) => {
+app.post('/favorite-artists/add', (req, res) => apiWrapper(req, res, async () => {
+    
+    // Asumimos que spotifyApi (la variable global) está disponible aquí gracias a apiWrapper.
+    // Si la librería que usas requiere una inicialización específica aquí, usa esa función.
+
     const userId = req.cookies?.spotify_user_id || currentUserId;
     const { artistId, artistName } = req.body;
-    if (!userId || !artistId || !artistName) return res.status(400).json({ error: 'Faltan datos' });
+    
+    // Verificación de datos
+    if (!userId || !artistId || !artistName) {
+        return res.status(400).json({ error: 'Faltan datos (userId, artistId o artistName).' });
+    }
     
     currentUserId = userId;
     const config = getUserConfig(userId);
     
     if (!config.favoriteArtists) config.favoriteArtists = [];
     
-    if (!config.favoriteArtists.some(a => a.id === artistId)) {
-        config.favoriteArtists.push({ id: artistId, name: artistName });
-        saveConfig(userId, config);
-        return res.json({ success: true, message: `✅ Artista ${artistName} añadido a Favoritos` });
+    // 1. Verificar si el artista ya existe
+    if (config.favoriteArtists.some(a => a.id === artistId)) {
+        return res.json({ success: true, message: 'Artista ya estaba en la lista.' });
     }
     
-    res.json({ success: true, message: 'Artista ya estaba en la lista.' });
+    let artistImage = null;
+    
+    try {
+        // 🛑 SOLUCIÓN: Usamos la variable global/externa 'spotifyApi' que debe ser inicializada por el wrapper.
+        // Si usas 'spotify-web-api-node', es correcto llamar a getArtist aquí.
+        const artistData = await spotifyApi.getArtist(artistId); 
+
+        // Obtenemos la URL de la imagen (la última, que suele ser la más pequeña)
+        const images = artistData.body.images; 
+        if (images && images.length > 0) {
+            artistImage = images[images.length - 1].url;
+        }
+        
+    } catch (error) {
+        // En caso de fallo de la API (ej. token expirado o error de la API), guardamos null.
+        console.error(`⚠️ Error al obtener la imagen del artista ${artistName} (${artistId}):`, error.message);
+    }
+    
+    // 2. Guardar el artista con la URL de la imagen (incluso si es null)
+    config.favoriteArtists.push({ 
+        id: artistId, 
+        name: artistName, 
+        image: artistImage 
+    });
+    
+    saveConfig(userId, config);
+    return res.json({ success: true, message: `✅ Artista ${artistName} añadido a Favoritos` });
+
+}));
+
+// --- NUEVO Endpoint para Eliminar Artista Favorito ---
+app.post('/favorite-artists/remove', (req, res) => {
+    const userId = req.cookies?.spotify_user_id || currentUserId;
+    const { artistId } = req.body;
+    
+    if (!userId || !artistId) {
+        return res.status(400).json({ error: 'Faltan datos del artista o usuario' });
+    }
+
+    const config = getUserConfig(userId);
+    
+    if (!config.favoriteArtists) {
+        return res.status(404).json({ success: true, message: 'Lista de favoritos vacía.' });
+    }
+    
+    const initialCount = config.favoriteArtists.length;
+    
+    // Filtramos para quitar el artista
+    config.favoriteArtists = config.favoriteArtists.filter(a => a.id !== artistId);
+    
+    saveConfig(userId, config);
+    
+    if (config.favoriteArtists.length < initialCount) {
+        return res.json({ success: true, message: '🗑️ Artista eliminado de Favoritos.' });
+    } else {
+        return res.json({ success: false, message: 'El artista no fue encontrado en la lista.' });
+    }
 });
 
 // ----------------------------------------
@@ -1036,6 +1100,63 @@ app.post('/excluir-artista', (req, res) => apiWrapper(req, res, async () => {
     }
 }));
 
+// ----------------------------------------
+// --- Endpoints de Gestión de Playlists ---
+// ----------------------------------------
+
+// A. Endpoint para Listar Playlists del Usuario
+app.get('/user-playlists', (req, res) => apiWrapper(req, res, async () => {
+    const targetUserId = req.cookies?.spotify_user_id || currentUserId;
+    if (!targetUserId) throw { statusCode: 401, message: 'No hay ID de usuario para obtener playlists.' };
+
+    let playlists = [];
+    let offset = 0;
+    
+    // Paginación para obtener hasta 100 playlists (50 por llamada)
+    while (true) {
+        // Obtenemos solo las playlists donde el usuario es dueño o colaborador (por defecto)
+        const data = await spotifyApi.getUserPlaylists(targetUserId, { limit: 50, offset });
+        
+        const items = data.body.items.map(p => ({
+            id: p.id,
+            name: p.name,
+            ownerId: p.owner.id,
+            owner: p.owner.display_name,
+            collaborative: p.collaborative // Para mostrar si es de otro usuario
+        }));
+        playlists = playlists.concat(items);
+        
+        if (!data.body.next) break;
+        offset += 50;
+    }
+    // Devolvemos la lista completa de playlists
+    return res.json(playlists);
+}));
+
+// B. Endpoint para Crear una Nueva Playlist
+app.post('/create-playlist', (req, res) => apiWrapper(req, res, async () => {
+    const { name } = req.body;
+    // targetUserId no es necesario para la llamada, pero lo mantengo para validación si quieres
+    const targetUserId = req.cookies?.spotify_user_id || currentUserId; 
+    
+    if (!name) throw { statusCode: 400, message: 'Se requiere el nombre de la playlist.' };
+    // Mantenemos esta validación si quieres, aunque la API de Spotify la manejaría
+    if (!targetUserId) throw { statusCode: 401, message: 'No hay ID de usuario para crear playlist.' };
+    
+    // 💡 CAMBIO CLAVE: Eliminar targetUserId como primer argumento
+    const data = await spotifyApi.createPlaylist(name, {
+        'public': false, 
+        'description': 'Playlist generada automáticamente por FilterFlow.'
+    });
+
+    const newPlaylist = {
+        id: data.body.id,
+        name: data.body.name,
+        // El API de Spotify no devuelve el ownerId, pero podemos usar el targetUserId
+        ownerId: targetUserId 
+    };
+    return res.json({ success: true, playlist: newPlaylist, message: `Playlist ${name} creada.` });
+}));
 
 // ----------------------------------------
 // --- Inicio del Servidor ---

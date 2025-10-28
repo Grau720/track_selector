@@ -1,4 +1,12 @@
 {
+  "name": "spotifilter-pro",
+  "version": "1.0.0",
+  "description": "Filtra, monitoriza y añade novedades musicales a playlists de Spotify automáticamente.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "clean": "rm -rf node_modules && npm install"
+  },
   "dependencies": {
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.2.3",
@@ -7,7 +15,10 @@
     "querystring": "^0.2.1",
     "spotify-web-api-node": "^5.0.2"
   },
-  "scripts": {
-    "start": "node index.js"
-  }
+  "devDependencies": {
+    "eslint": "^9.14.0",
+    "nodemon": "^3.1.7"
+  },
+  "author": "Pablo Grau",
+  "license": "MIT"
 }

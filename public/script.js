@@ -10,6 +10,7 @@ let allGenres = [];
 let filteredArtists = [];
 let allPlaylists = [];
 let userId = '';
+let recommendedArtistsCache = []; // Cache para no recargar constantemente
 
 // ----------------------------------------
 // --- FUNCIONES DE UTILIDAD ---
@@ -111,14 +112,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderSelectedGenres();
       renderAllGenresList();
       
-      // 5. Cargar playlists en segundo plano (no bloqueante)
+      // 5. Cargar playlists
       loadPlaylists().catch(err => console.error('Error cargando playlists:', err));
       
-      // 6. Cargar favoritos (ligero) también en segundo plano
+      // 6. Cargar favoritos
       loadFavoriteArtists().catch(err => console.error('Error cargando favoritos:', err));
-      
-      // 7. NO cargar recomendados ni artistas filtrados automáticamente
-      // El usuario debe hacer click en las pestañas o botón refrescar
+
+      if (config.generos && config.generos.length > 0) {
+          loadAndRenderRecommendedArtists().catch(err => console.error('Error cargando recomendados:', err));
+      }
       
     } catch (err) {
       console.error('Error cargando:', err);
@@ -129,7 +131,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   
     // --- EVENT LISTENERS ---
   
-    document.getElementById('add-genre-btn').addEventListener('click', () => {
+    document.getElementById('add-genre-btn').addEventListener('click', (e) => { 
+      e.stopPropagation(); 
       document.getElementById('all-genres').classList.toggle('hidden');
     });
   
@@ -137,21 +140,67 @@ document.addEventListener('DOMContentLoaded', async () => {
       renderAllGenresList(e.target.value);
     });
     
-    document.getElementById('playlist-search').addEventListener('input', (e) => {
-      renderPlaylistResults(e.target.value);
+    // LISTENERS DE PLAYLIST ACTUALIZADOS 🎧
+    const playlistSelector = document.getElementById('destination-playlist');
+    const createPlaylistBtn = document.getElementById('create-playlist-btn');
+    const emptyPlaylistBtnCard = document.getElementById('empty-playlist-btn-card'); // FIX: ID corregido
+    const newPlaylistForm = document.getElementById('new-playlist-form');
+    const confirmCreatePlaylistBtn = document.getElementById('confirm-create-playlist-btn');
+    const cancelCreatePlaylistBtn = document.getElementById('cancel-create-playlist-btn');
+    
+    // 1. Guardar Playlist Seleccionada
+    playlistSelector.addEventListener('change', async (e) => {
+        const playlistId = e.target.value;
+        if (playlistId) {
+            config.playlistId = playlistId;
+            await saveConfig();
+            renderSelectedPlaylistDisplay(); 
+            showToast('Playlist de destino guardada.', 'info');
+        }
+    });
+
+    // 2. Mostrar/Ocultar formulario de creación
+    createPlaylistBtn.addEventListener('click', () => {
+        newPlaylistForm.classList.toggle('hidden');
     });
     
+    cancelCreatePlaylistBtn.addEventListener('click', () => {
+        newPlaylistForm.classList.add('hidden');
+        document.getElementById('new-playlist-name').value = '';
+    });
+    
+    confirmCreatePlaylistBtn.addEventListener('click', createNewPlaylist);
+
+    // 3. Vaciar Playlist
+    emptyPlaylistBtnCard.addEventListener('click', vaciarPlaylist); // FIX: ID corregido
+    
+    // Lógica de Artistas Favoritos (Búsqueda)
     let searchTimeout;
     document.getElementById('favorite-artist-search').addEventListener('input', (e) => {
         clearTimeout(searchTimeout);
         searchTimeout = setTimeout(() => searchArtist(e.target.value), 500);
     });
     
-    // NUEVO: Solo cargar recomendados cuando el usuario haga click
+    // Navegación de pestañas para cargar datos
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tab = btn.dataset.tab;
+            
+            // Lógica de tab navigation (ocultar/mostrar)
+
+            // Cargar datos SOLO cuando se accede a la pestaña
+            if (tab === 'history') {
+                loadAndRenderHistory();
+            } else if (tab === 'config') {
+                updateFilteredArtists();
+            }
+        });
+    });
+
+    // Solo cargar recomendados cuando el usuario haga click
     document.getElementById('refresh-recommended-btn').addEventListener('click', loadAndRenderRecommendedArtists);
 
     document.getElementById('run-filter-btn').addEventListener('click', filtrarYAnadir);
-    document.getElementById('empty-playlist-btn').addEventListener('click', vaciarPlaylist);
 });
 
 // ----------------------------------------
@@ -256,83 +305,65 @@ function renderArtistList() {
 }
   
 function renderSelectedPlaylistDisplay() {
-      const display = document.getElementById('selected-playlist-display');
-      const selected = allPlaylists.find(p => p.id === config.playlistId);
-  
-      display.innerHTML = '';
-  
-      if (selected) {
-          display.classList.remove('hidden');
-          display.className = 'playlist-display';
-          
-          if (selected.image) {
-              const img = document.createElement('img');
-              img.src = selected.image;
-              display.appendChild(img);
-          }
-          const info = document.createElement('div');
-          info.innerHTML = `<strong>${selected.name}</strong><br><small style="color: var(--text-secondary);">${selected.tracks} canciones</small>`;
-          display.appendChild(info);
-      } else {
-          display.classList.add('hidden');
-      }
+    // La función renderPlaylistResults y el selector ahora manejan la selección
+    // Esta función se vuelve redundante con el nuevo HTML/Select,
+    // pero la mantenemos para posibles usos futuros o debug.
+    
+    const selector = document.getElementById('destination-playlist');
+    
+    // Asegurar que el select refleje la configuración
+    if (config.playlistId && selector.value !== config.playlistId) {
+        selector.value = config.playlistId;
+    }
+
+    // Opcionalmente, mostrar info debajo del select
+    const selected = allPlaylists.find(p => p.id === config.playlistId);
+    
+    let infoDiv = document.getElementById('selected-playlist-info');
+    if (!infoDiv) {
+        infoDiv = document.createElement('div');
+        infoDiv.id = 'selected-playlist-info';
+        infoDiv.style.marginTop = '0.5rem';
+        infoDiv.style.color = 'var(--text-secondary)';
+        document.querySelector('.card:nth-child(2)').appendChild(infoDiv);
+    }
+
+    if (selected) {
+        infoDiv.innerHTML = `<small>Canciones: ${selected.tracks || 0}</small>`;
+    } else {
+        infoDiv.innerHTML = '';
+    }
 }
   
-function renderPlaylistResults(filter = '') {
-      const resultsCont = document.getElementById('playlist-results');
-      resultsCont.innerHTML = '';
-      const lowerFilter = filter.toLowerCase().trim();
-  
-      let playlistsToShow = allPlaylists;
-      
-      if (lowerFilter.length > 0) {
-          playlistsToShow = allPlaylists.filter(p => p.name.toLowerCase().includes(lowerFilter));
-          resultsCont.classList.remove('hidden');
-      } else {
-          playlistsToShow = allPlaylists.slice(0, 5);
-          resultsCont.classList.remove('hidden');
-      }
-      
-      if (playlistsToShow.length === 0) {
-          resultsCont.innerHTML = '<div class="empty-state">No se encontraron playlists</div>';
+/**
+ * Renderiza la lista desplegable de playlists según el filtro y el estado de foco del input.
+ * El HTML final usa un <select>, esta función se adapta a la nueva estructura.
+ * Esta versión se simplifica solo para asegurar que el select esté lleno.
+ */
+function renderPlaylistResults() {
+      const selector = document.getElementById('destination-playlist');
+      selector.innerHTML = '<option value="" disabled selected>-- Selecciona una Playlist --</option>';
+
+      if (allPlaylists.length === 0) {
+          selector.innerHTML += '<option value="" disabled>No se encontraron playlists...</option>';
           return;
       }
   
-      playlistsToShow.forEach(p => {
-          const div = document.createElement('div');
-          div.className = 'dropdown-item';
-          div.style.display = 'flex';
-          div.style.alignItems = 'center';
-          div.style.gap = '0.75rem';
-          
-          if (p.id === config.playlistId) {
-              div.classList.add('selected');
-          }
-  
-          if (p.image) {
-              const img = document.createElement('img');
-              img.src = p.image;
-              img.style.width = '40px';
-              img.style.height = '40px';
-              img.style.borderRadius = '4px';
-              img.style.objectFit = 'cover';
-              div.appendChild(img);
-          }
-  
-          const name = document.createElement('span');
-          name.innerHTML = `${p.name}<br><small style="color: var(--text-secondary);">${p.tracks} canciones</small>`;
-          div.appendChild(name);
-          
-          div.onclick = () => {
-              config.playlistId = p.id;
-              saveConfig();
-              renderPlaylistResults(filter); 
-              renderSelectedPlaylistDisplay(); 
-              showToast(`Playlist "${p.name}" seleccionada`, 'success');
-          };
-  
-          resultsCont.appendChild(div);
+      allPlaylists.sort((a, b) => a.name.localeCompare(b.name));
+      
+      allPlaylists.forEach(p => {
+          const option = document.createElement('option');
+          option.value = p.id;
+          option.textContent = p.name;
+          selector.appendChild(option);
       });
+      
+      // Aseguramos que el select refleje la configuración después de renderizar
+      if (config.playlistId) {
+          selector.value = config.playlistId;
+      }
+
+      renderSelectedPlaylistDisplay();
 }
   
 // ----------------------------------------
@@ -369,6 +400,7 @@ async function searchArtist(query) {
             if (button.disabled) {
                 button.textContent = `✓ ${artist.name}`;
                 button.className = 'btn btn-primary';
+                button.disabled = true;
             }
             
             button.onclick = () => addArtistToFavorites(artist.id, artist.name);
@@ -429,17 +461,19 @@ async function loadFavoriteArtists() {
             chip.className = 'favorite-chip';
             
             const img = document.createElement('img');
-            img.src = artist.image || 'https://via.placeholder.com/24';
-            img.alt = artist.name;
+            img.src = artist.image || 'https://via.placeholder.com/24'; 
+            img.alt = ''; 
             
             const name = document.createElement('span');
-            name.textContent = artist.name;
+            name.textContent = artist.name; 
             
             const removeBtn = document.createElement('button');
-            removeBtn.className = 'favorite-chip-remove';
+            removeBtn.className = 'chip-remove favorite-chip-remove'; // Asegura ambas clases
             removeBtn.textContent = '×';
+            
             removeBtn.onclick = async () => {
-                chip.remove();
+                chip.style.opacity = '0.5'; 
+                await removeFavoriteArtist(artist.id, chip); 
             };
             
             chip.appendChild(img);
@@ -451,6 +485,47 @@ async function loadFavoriteArtists() {
     } catch (error) {
         list.innerHTML = '<div style="color: var(--danger);">Error al cargar la lista</div>';
         console.error(error);
+    }
+}
+
+/**
+ * Llama al backend para eliminar un artista de la lista de favoritos y actualiza el DOM.
+ */
+async function removeFavoriteArtist(artistId, chipElement) {
+    try {
+        const res = await fetch(`/favorite-artists/remove`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ artistId })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+             throw new Error(data.message || `Error ${res.status} al comunicarse con el servidor.`);
+        }
+
+        if (data.success) {
+            showToast(data.message || 'Artista eliminado', 'success');
+            
+            chipElement.remove();
+            
+            config.favoriteArtists = config.favoriteArtists.filter(a => a.id !== artistId);
+            
+            // Opcional: Refrescar la lista de recomendados si está visible
+            // updateFilteredArtists(); 
+            
+        } else {
+            throw new Error(data.message || 'La eliminación falló sin un error de red.');
+        }
+
+    } catch (error) {
+        showToast(`Error al eliminar: ${error.message}`, 'error');
+        console.error('Error en removeFavoriteArtist:', error);
+        
+        if (chipElement) {
+            chipElement.style.opacity = '1';
+        }
     }
 }
 
@@ -471,7 +546,7 @@ async function loadAndRenderRecommendedArtists() {
     if (config.generos.length === 0) {
         cont.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🎵</div><div>Selecciona géneros para obtener recomendaciones</div></div>';
         refreshBtn.disabled = false;
-        refreshBtn.textContent = '🔄';
+        refreshBtn.textContent = '🔄 Recargar';
         return;
     }
 
@@ -490,7 +565,7 @@ async function loadAndRenderRecommendedArtists() {
         console.error('Error cargando recomendaciones:', error);
     } finally {
         refreshBtn.disabled = false;
-        refreshBtn.textContent = '🔄';
+        refreshBtn.textContent = '🔄 Recargar';
     }
 }
 
@@ -499,7 +574,7 @@ function renderRecommendedArtists(artists) {
     cont.innerHTML = '';
 
     if (artists.length === 0) {
-        cont.innerHTML = '<div class="empty-state"><div class="empty-state-icon">✨</div><div>No hay nuevas sugerencias</div></div>';
+        cont.innerHTML = '<div class="empty-state" style="grid-column: 1 / -1;"><div class="empty-state-icon">✨</div><div>No hay nuevas sugerencias</div></div>';
         return;
     }
 
@@ -611,7 +686,7 @@ async function loadAndRenderHistory() {
                                     
                                     if (track.uri) {
                                         const spotifyId = track.uri.split(':').pop();
-                                        linksHtml += `<a href="https://open.spotify.com/track/${spotifyId}" target="_blank" style="color: var(--accent);">Spotify</a>`;
+                                        linksHtml += `<a href="https://open.spotify.com/track/${spotifyId}" target="_blank" style="color: var(--accent);">Spotify</a>`; // FIX: URL de Spotify corregida
                                     }
                                     
                                     if (links.youtubeMusic) {
@@ -662,8 +737,7 @@ async function loadAndRenderHistory() {
 async function loadPlaylists() {
     // No mostrar loading si ya están cargadas
     if (allPlaylists.length > 0) {
-        renderSelectedPlaylistDisplay(); 
-        renderPlaylistResults();
+        renderPlaylistResults(); 
         return;
     }
     
@@ -672,12 +746,57 @@ async function loadPlaylists() {
         const playlistsRes = await fetch('/playlists');
         if (!playlistsRes.ok) throw new Error('No se pudo cargar playlists');
         allPlaylists = await playlistsRes.json();
-        renderSelectedPlaylistDisplay(); 
         renderPlaylistResults(); 
     } catch (err) {
         console.error('Error recargando playlists:', err);
         showToast('Error al recargar playlists', 'error');
     } finally {
+        setLoading(false);
+    }
+}
+
+async function createNewPlaylist() {
+    const nameInput = document.getElementById('new-playlist-name');
+    const name = nameInput.value.trim();
+
+    if (!name) {
+        showToast('Debes ingresar un nombre para la playlist.', 'warning');
+        return;
+    }
+
+    const confirmBtn = document.getElementById('confirm-create-playlist-btn');
+    confirmBtn.disabled = true;
+    confirmBtn.textContent = 'Creando...';
+    
+    setLoading(true, 'Creando nueva playlist...');
+
+    try {
+        const res = await fetch('/create-playlist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+
+        if (!res.ok || !data.success) throw new Error(data.message || 'Fallo al crear playlist.');
+
+        showToast(data.message, 'success');
+        
+        // Recargar la lista de playlists para incluir la nueva
+        await loadPlaylists(); 
+        
+        // Seleccionar la nueva playlist
+        config.playlistId = data.playlist.id;
+        await saveConfig(); 
+        
+        document.getElementById('new-playlist-form').classList.add('hidden');
+        document.getElementById('new-playlist-name').value = '';
+
+    } catch (error) {
+        showToast(`Error: ${error.message}`, 'error');
+    } finally {
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Crear y Usar';
         setLoading(false);
     }
 }
@@ -715,7 +834,10 @@ async function updateFilteredArtists() {
       const artistasRes = await fetch('/artistas-filtrados', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ generos: config.generos || [] }) 
+        body: JSON.stringify({ 
+            generos: config.generos || [], 
+            favoriteArtists: config.favoriteArtists || [] 
+        }) // FIX: Asegurar que se envíen los favoritos también
       });
       
       if (artistasRes.status === 401) {
@@ -785,6 +907,7 @@ async function excludeArtist(artist, listItem) {
       
       if (!config.excludedArtists.includes(artist.id)) {
         config.excludedArtists.push(artist.id);
+        await saveConfig(); // Guardar exclusión
       }
       
       listItem.style.transition = 'all 0.3s';
