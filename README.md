@@ -1,1 +1,1 @@
-Track Selector Git
+npm start para levantarlo, crack.
