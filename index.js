@@ -1,24 +1,29 @@
+
 const express = require('express');
 const fs = require('fs');
 const cookieParser = require('cookie-parser');
 const SpotifyWebApi = require('spotify-web-api-node');
 const path = require('path');
-const db = require('./db');
+// const db = require('./db'); // Comentado si no lo estás usando
+
+// 💡 NUEVO: Importar funciones de tokens para persistencia multiusuario
+const { saveUserTokens } = require('./tokens'); 
 
 const app = express();
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.static('public')); 
 
-let currentAccessToken = null;
-let currentUserId = null;
-let currentRefreshToken = null;
+// 🛑 ELIMINADAS: Estas variables globales ya NO se usan para tokens de usuario.
+// let currentAccessToken = null;
+// let currentUserId = null; 
+// let currentRefreshToken = null;
 
 const CONFIG_PATH = path.join(__dirname, 'configs.json');
 const HISTORY_PATH = path.join(__dirname, 'history.json');
 
 // ----------------------------------------
-// --- Funciones de Configuración y Historial ---
+// --- Funciones de Configuración y Historial (SIN CAMBIOS) ---
 // ----------------------------------------
 function loadConfigs() {
   if (!fs.existsSync(CONFIG_PATH)) return {};
@@ -97,82 +102,99 @@ const COOKIE_OPTIONS = {
     secure: process.env.NODE_ENV === 'production' // Usar HTTPS en producción
 };
 
+
 // ----------------------------------------
-// --- Lógica de Refresco de Token y Wrapper ---
+// --- MIDDLEWARE: Carga y Refresco de Tokens (CRUCIAL) ---
 // ----------------------------------------
 
-async function refreshAccessToken(req, res) {
-    const refreshToken = req.cookies?.spotify_refresh_token || currentRefreshToken;
-    
-    if (!refreshToken) {
-        console.error('❌ No hay Refresh Token disponible.');
-        return false;
+async function loadAndRefreshUserTokens(req, res, next) {
+    const userId = req.cookies?.spotify_user_id;
+    let accessToken = req.cookies?.spotify_access_token;
+    let refreshToken = req.cookies?.spotify_refresh_token;
+
+    // Si no hay cookies, no hay sesión activa.
+    if (!userId || !accessToken || !refreshToken) {
+        spotifyApi.setAccessToken(undefined);
+        spotifyApi.setRefreshToken(undefined);
+        return next();
     }
-
-    spotifyApi.setClientId(clientId);
-    spotifyApi.setClientSecret(clientSecret);
+    
+    // 1. Aplicar los tokens del usuario actual a la instancia global (spotifyApi)
+    spotifyApi.setAccessToken(accessToken);
     spotifyApi.setRefreshToken(refreshToken);
-    
-    try {
-        const data = await spotifyApi.refreshAccessToken();
-        currentAccessToken = data.body['access_token'];
-        spotifyApi.setAccessToken(currentAccessToken);
-        
-        // Guardar el nuevo token con las opciones de seguridad
-        res.cookie('spotify_access_token', currentAccessToken, { ...COOKIE_OPTIONS, maxAge: 3600000 });
-        
-        if (data.body['refresh_token']) {
-            currentRefreshToken = data.body['refresh_token'];
-            res.cookie('spotify_refresh_token', currentRefreshToken, COOKIE_OPTIONS);
-            spotifyApi.setRefreshToken(currentRefreshToken);
-        }
-        
-        console.log('✅ Token de acceso refrescado correctamente.');
-        return true;
-    } catch (err) {
-        console.error('❌ Error al refrescar el token (fallo final):', err.message);
-        return false;
-    }
-}
-
-async function apiWrapper(req, res, apiCall) {
-    const token = req.cookies?.spotify_access_token || currentAccessToken;
-    const refreshToken = req.cookies?.spotify_refresh_token || currentRefreshToken;
-
-    if (!token) return res.status(401).json({ error: 'No token. Por favor, vuelve a iniciar sesión.' });
-
-    // 💡 Aseguramos que el SDK tiene TODAS las credenciales (client y user tokens) 
-    spotifyApi.setClientId(clientId);
-    spotifyApi.setClientSecret(clientSecret);
-    spotifyApi.setAccessToken(token);
-    if (refreshToken) spotifyApi.setRefreshToken(refreshToken);
 
     try {
-        await apiCall();
+        // 2. Intentar validar el token con una llamada ligera
+        await spotifyApi.getMe(); 
+        
     } catch (err) {
-        if (err.statusCode === 401 && refreshToken) {
-            console.log('Token expirado, intentando refrescar...');
-            const success = await refreshAccessToken(req, res);
-            if (success) {
-                try {
-                    // Reintento de la llamada API
-                    await apiCall();
-                } catch (retryErr) {
-                    console.error('❌ Error en el reintento:', retryErr);
-                    res.status(retryErr.statusCode || 500).json({ error: retryErr.message || 'Error en la API de Spotify (reintento fallido)' });
+        if (err.statusCode === 401) {
+            console.log(`[${userId}] Token expirado. Refrescando...`);
+            
+            try {
+                // El SDK ya tiene el client ID/Secret de la inicialización.
+                const data = await spotifyApi.refreshAccessToken();
+                const newAccessToken = data.body['access_token'];
+                
+                // 3. ACTUALIZAR COOKIES Y PERSISTENCIA
+                res.cookie('spotify_access_token', newAccessToken, { 
+                    ...COOKIE_OPTIONS, 
+                    maxAge: 3600000 // 1 hora
+                });
+                spotifyApi.setAccessToken(newAccessToken);
+                
+                // 4. Guardar el nuevo token en el almacenamiento persistente
+                await saveUserTokens(userId, newAccessToken, refreshToken);
+                console.log(`[${userId}] Token refrescado correctamente.`);
+
+            } catch (refreshErr) {
+                console.error(`[${userId}] Error al refrescar token:`, refreshErr.message);
+                
+                // Falló el refresco: forzar reautenticación
+                res.clearCookie('spotify_access_token', COOKIE_OPTIONS);
+                res.clearCookie('spotify_refresh_token', COOKIE_OPTIONS);
+                res.clearCookie('spotify_user_id', COOKIE_OPTIONS);
+
+                // Si es un endpoint de API, devolvemos 401.
+                if (req.path.startsWith('/api') || req.path.startsWith('/playlists')) {
+                    return res.status(401).json({ error: 'Token de sesión expirado. Vuelve a iniciar sesión.' });
                 }
-            } else {
-                res.status(401).json({ error: 'Token de sesión expirado. Por favor, vuelve a iniciar sesión.' });
             }
         } else {
-            console.error('❌ Error general:', err);
+            console.error(`Error de Spotify no 401 para ${userId}:`, err.message);
+        }
+    }
+    
+    // El token (refrescado o no) ya está configurado en spotifyApi para la siguiente llamada
+    next();
+}
+
+// Aplicar el middleware a TODAS las rutas que necesiten Spotify
+app.use(loadAndRefreshUserTokens);
+
+
+// ----------------------------------------
+// --- WRAPPER DE ERRORES (Reemplaza al antiguo apiWrapper) ---
+// ----------------------------------------
+
+// Esta función es un simple manejador de errores, ya que el middleware
+// se encargó de la autenticación y el refresco.
+function standardApiWrapper(apiCall) {
+    return async (req, res) => {
+        try {
+            // El middleware ya garantizó que spotifyApi tiene el token correcto.
+            await apiCall(req, res);
+        } catch (err) {
+            // El 401 ya fue manejado por el middleware.
+            console.error('❌ Error de Endpoint (tras middleware):', err.message);
             res.status(err.statusCode || 500).json({ error: err.message || 'Error en la API de Spotify' });
         }
     }
 }
 
+
 // ----------------------------------------
-// --- Funciones de Utilidad ---
+// --- Funciones de Utilidad (SIN CAMBIOS) ---
 // ----------------------------------------
 
 function delay(ms) {
@@ -195,47 +217,25 @@ function findExternalLinks(title, artist, isrc) {
 // ----------------------------------------
 // index.js (Endpoint /)
 app.get('/', async (req, res) => {
-    const token = req.cookies?.spotify_access_token;
-    
-    if (!token) return res.redirect('/login');
-    
-    spotifyApi.setAccessToken(token);
-    try {
-        await spotifyApi.getMe(); // Llama a 'me' para validar el token
-    } catch (err) {
-        // Si falla con 401, forzamos el refresh ANTES de cargar la página
-        if (err.statusCode === 401 && req.cookies?.spotify_refresh_token) {
-            console.log('Token expirado en /, forzando refresh...');
-            const success = await refreshAccessToken(req, res);
-            if (!success) {
-                // Si el refresh falla, redirigimos a login
-                return res.redirect('/login');
-            }
-        } else if (err.statusCode === 401) {
-             return res.redirect('/login');
-        } else {
-             console.error('Error no 401 al cargar /:', err.message);
-        }
+    // Si el middleware borró las cookies (por refresh fallido) o no existen, redirigir.
+    if (!req.cookies?.spotify_access_token) {
+        return res.redirect('/login');
     }
-    
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// ENDPOINT /login (CORREGIDO: Opciones de seguridad de cookies)
+// ENDPOINT /login (SIN CAMBIOS)
 app.get('/login', (req, res) => {
   const state = Math.random().toString(36).substring(2, 15);
-  
-  // Usamos opciones seguras para el STATE
   res.cookie('spotify_auth_state', state, { 
       ...COOKIE_OPTIONS, 
       maxAge: 300000 // 5 minutos para el estado
   }); 
-  
   const authorizeURL = spotifyApi.createAuthorizeURL(scopes, state);
   res.redirect(authorizeURL);
 });
 
-// ENDPOINT /callback (CORREGIDO: Opciones de seguridad de cookies)
+// ENDPOINT /callback (CORREGIDO para Persistencia)
 app.get('/callback', async (req, res) => {
   const code = req.query.code;
   const state = req.query.state;
@@ -243,7 +243,6 @@ app.get('/callback', async (req, res) => {
   
   if (!state || state !== storedState) return res.status(403).send('Estado inválido');
   
-  // Limpia la cookie de estado con las mismas opciones que se usaron para establecerla
   res.clearCookie('spotify_auth_state', COOKIE_OPTIONS); 
 
   try {
@@ -254,18 +253,22 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setAccessToken(accessToken);
     spotifyApi.setRefreshToken(refreshToken);
     
-    currentAccessToken = accessToken;
-    currentRefreshToken = refreshToken;
+    // 🛑 ELIMINADAS: No asignamos a variables globales
+    // currentAccessToken = accessToken;
+    // currentRefreshToken = refreshToken;
 
     const me = await spotifyApi.getMe();
-    currentUserId = me.body.id;
+    const userId = me.body.id; // Usar variable local
+
+    // 💡 CLAVE: Guardar los tokens en el almacenamiento persistente
+    await saveUserTokens(userId, accessToken, refreshToken);
     
     // Aplicar opciones seguras
     res.cookie('spotify_access_token', accessToken, { ...COOKIE_OPTIONS, maxAge: 3600000 }); 
     res.cookie('spotify_refresh_token', refreshToken, COOKIE_OPTIONS);
     
     // La cookie del ID de usuario debe ser legible por el frontend (httpOnly: false)
-    res.cookie('spotify_user_id', currentUserId, { ...COOKIE_OPTIONS, httpOnly: false });
+    res.cookie('spotify_user_id', userId, { ...COOKIE_OPTIONS, httpOnly: false });
     
     console.log('Conectado como:', me.body.display_name);
     res.redirect('/');
@@ -277,20 +280,22 @@ app.get('/callback', async (req, res) => {
 
 
 // ----------------------------------------
-// --- Endpoints de Configuración y Datos ---
+// --- Endpoints de Configuración y Datos (AJUSTADOS) ---
 // ----------------------------------------
 app.get('/config', (req, res) => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+    // 🛑 ELIMINADO: Ya no usamos currentUserId
+    const userId = req.cookies?.spotify_user_id; 
     if (!userId) return res.status(401).json({ error: 'No user' });
-    currentUserId = userId;
+    
     const config = getUserConfig(userId);
     res.json(config || { generos: [], excludedArtists: [], playlistId: null, favoriteArtists: [] });
 });
 
 app.post('/config', (req, res) => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+    // 🛑 ELIMINADO: Ya no usamos currentUserId
+    const userId = req.cookies?.spotify_user_id; 
     if (!userId) return res.status(401).json({ error: 'No user' });
-    currentUserId = userId;
+    
     const config = req.body;
     
     const oldConfig = getUserConfig(userId) || {};
@@ -310,35 +315,28 @@ app.get('/history', (req, res) => {
 
 
 // ----------------------------------------
-// --- Endpoints de Artistas Favoritos ---
+// --- Endpoints de Artistas Favoritos (AJUSTADOS) ---
 // ----------------------------------------
 app.get('/favorite-artists', (req, res) => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+    const userId = req.cookies?.spotify_user_id;
     if (!userId) return res.status(401).json({ error: 'No user' });
     const config = getUserConfig(userId);
-    // Ahora, config.favoriteArtists incluirá el campo 'image'
     res.json(config.favoriteArtists || []);
 });
 
-app.post('/favorite-artists/add', (req, res) => apiWrapper(req, res, async () => {
+app.post('/favorite-artists/add', standardApiWrapper(async (req, res) => {
     
-    // Asumimos que spotifyApi (la variable global) está disponible aquí gracias a apiWrapper.
-    // Si la librería que usas requiere una inicialización específica aquí, usa esa función.
-
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+    const userId = req.cookies?.spotify_user_id;
     const { artistId, artistName } = req.body;
     
-    // Verificación de datos
     if (!userId || !artistId || !artistName) {
         return res.status(400).json({ error: 'Faltan datos (userId, artistId o artistName).' });
     }
     
-    currentUserId = userId;
     const config = getUserConfig(userId);
     
     if (!config.favoriteArtists) config.favoriteArtists = [];
     
-    // 1. Verificar si el artista ya existe
     if (config.favoriteArtists.some(a => a.id === artistId)) {
         return res.json({ success: true, message: 'Artista ya estaba en la lista.' });
     }
@@ -346,22 +344,18 @@ app.post('/favorite-artists/add', (req, res) => apiWrapper(req, res, async () =>
     let artistImage = null;
     
     try {
-        // 🛑 SOLUCIÓN: Usamos la variable global/externa 'spotifyApi' que debe ser inicializada por el wrapper.
-        // Si usas 'spotify-web-api-node', es correcto llamar a getArtist aquí.
         const artistData = await spotifyApi.getArtist(artistId); 
 
-        // Obtenemos la URL de la imagen (la última, que suele ser la más pequeña)
         const images = artistData.body.images; 
         if (images && images.length > 0) {
-            artistImage = images[images.length - 1].url;
+            // Última imagen (generalmente la más pequeña)
+            artistImage = images[images.length - 1].url; 
         }
         
     } catch (error) {
-        // En caso de fallo de la API (ej. token expirado o error de la API), guardamos null.
         console.error(`⚠️ Error al obtener la imagen del artista ${artistName} (${artistId}):`, error.message);
     }
     
-    // 2. Guardar el artista con la URL de la imagen (incluso si es null)
     config.favoriteArtists.push({ 
         id: artistId, 
         name: artistName, 
@@ -373,9 +367,9 @@ app.post('/favorite-artists/add', (req, res) => apiWrapper(req, res, async () =>
 
 }));
 
-// --- NUEVO Endpoint para Eliminar Artista Favorito ---
+// --- Endpoint para Eliminar Artista Favorito (AJUSTADO) ---
 app.post('/favorite-artists/remove', (req, res) => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+    const userId = req.cookies?.spotify_user_id;
     const { artistId } = req.body;
     
     if (!userId || !artistId) {
@@ -390,7 +384,6 @@ app.post('/favorite-artists/remove', (req, res) => {
     
     const initialCount = config.favoriteArtists.length;
     
-    // Filtramos para quitar el artista
     config.favoriteArtists = config.favoriteArtists.filter(a => a.id !== artistId);
     
     saveConfig(userId, config);
@@ -403,9 +396,9 @@ app.post('/favorite-artists/remove', (req, res) => {
 });
 
 // ----------------------------------------
-// --- Endpoint de Búsqueda de Spotify ---
+// --- Endpoint de Búsqueda de Spotify (AJUSTADO) ---
 // ----------------------------------------
-app.get('/api/search', (req, res) => apiWrapper(req, res, async () => {
+app.get('/api/search', standardApiWrapper(async (req, res) => {
     const { q } = req.query;
     if (!q) throw { statusCode: 400, message: 'Falta el parámetro de búsqueda (q)' };
 
@@ -420,7 +413,7 @@ app.get('/api/search', (req, res) => apiWrapper(req, res, async () => {
 }));
 
 // ----------------------------------------
-// --- Configuración del algoritmo ---
+// --- Configuración del algoritmo (SIN CAMBIOS) ---
 // ----------------------------------------
 const RECOMMENDATION_CONFIG = {
   topArtistsToUse: 10,           // Cuántos de tus artistas usar como semilla
@@ -432,7 +425,7 @@ const RECOMMENDATION_CONFIG = {
 };
 
 // ----------------------------------------
-// --- Función auxiliar: Reintentos con rate limits ---
+// --- Función auxiliar: Reintentos con rate limits (SIN CAMBIOS) ---
 // ----------------------------------------
 async function retryApiCall(apiCall, maxRetries = 2, baseDelayMs = 1000) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -447,7 +440,6 @@ async function retryApiCall(apiCall, maxRetries = 2, baseDelayMs = 1000) {
                 continue;
             }
             
-            // Si es 404 y no es el último intento, reintentar
             if (err.statusCode === 404 && attempt < maxRetries) {
                 await delay(baseDelayMs * attempt);
                 continue;
@@ -459,10 +451,10 @@ async function retryApiCall(apiCall, maxRetries = 2, baseDelayMs = 1000) {
 }
 
 // ----------------------------------------
-// --- Endpoint: Artistas Recomendados (ESTRATEGIA: TOP TRACKS) ---
+// --- Endpoint: Artistas Recomendados (AJUSTADO) ---
 // ----------------------------------------
-app.get('/api/recommended-artists', (req, res) => apiWrapper(req, res, async () => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+app.get('/api/recommended-artists', standardApiWrapper(async (req, res) => {
+    const userId = req.cookies?.spotify_user_id;
     if (!userId) {
         return res.status(401).json({ error: 'No hay ID de usuario disponible' });
     }
@@ -519,6 +511,7 @@ app.get('/api/recommended-artists', (req, res) => apiWrapper(req, res, async () 
                 message: 'Necesitas seguir artistas primero' 
             });
         }
+        // ... (el resto del algoritmo permanece igual, ya que usa spotifyApi) ...
 
         console.log(`🎯 Base: ${myArtistsArray.length} artistas propios`);
 
@@ -736,14 +729,15 @@ app.get('/api/recommended-artists', (req, res) => apiWrapper(req, res, async () 
     }
 }));
 
+
 // ----------------------------------------
-// --- Endpoints de la API de Spotify ---
+// --- Endpoints de la API de Spotify (AJUSTADOS) ---
 // ----------------------------------------
 
-app.get('/playlists', (req, res) => apiWrapper(req, res, async () => {
+app.get('/playlists', standardApiWrapper(async (req, res) => {
     let playlists = [];
     let offset = 0;
-    const targetUserId = req.cookies?.spotify_user_id || currentUserId;
+    const targetUserId = req.cookies?.spotify_user_id; // 🛑 Usamos solo la cookie
     if (!targetUserId) throw { statusCode: 401, message: 'No hay ID de usuario para obtener playlists.' };
     
     while (true) {
@@ -752,7 +746,6 @@ app.get('/playlists', (req, res) => apiWrapper(req, res, async () => {
             id: p.id,
             name: p.name,
             tracks: p.tracks.total,
-            // 💡 CORRECCIÓN: Usar encadenamiento opcional (?) para evitar 'Cannot read properties of null'
             image: p.images?.[0]?.url || null, 
             owner: p.owner.display_name
         }));
@@ -763,31 +756,26 @@ app.get('/playlists', (req, res) => apiWrapper(req, res, async () => {
     res.json(playlists);
 }));
 
-app.get('/generos', (req, res) => apiWrapper(req, res, async () => {
+app.get('/generos', standardApiWrapper(async (req, res) => {
     
     console.log('DEBUG: Ejecutando /generos (NUEVA ESTRATEGIA: Extracción de Artistas Seguidos)');
     
     const uniqueGenres = new Set();
     let after = null; // Para paginación
 
-    // Iterar sobre todos los artistas seguidos del usuario autenticado
     while (true) {
-        const opts = { limit: 50 }; // Paginación: obtener 50 artistas a la vez
+        const opts = { limit: 50 };
         if (after) opts.after = after;
         
-        // spotifyApi.getFollowedArtists requiere el scope 'user-follow-read'
         const data = await spotifyApi.getFollowedArtists(opts);
         const artists = data.body.artists.items;
 
-        // Recolectar todos los géneros de estos 50 artistas
         artists.forEach(a => {
             a.genres.forEach(g => uniqueGenres.add(g));
         });
 
-        // 🚨 CRUCIAL: Detener la paginación si no hay más elementos
         if (!data.body.artists.next) break;
         
-        // Establecer el ID del último artista como cursor para la siguiente página
         after = artists[artists.length - 1].id;
     }
 
@@ -795,17 +783,16 @@ app.get('/generos', (req, res) => apiWrapper(req, res, async () => {
     
     console.log(`DEBUG: ✅ ${genresArray.length} géneros únicos extraídos de artistas seguidos.`);
     
-    // Devolver la lista compilada para que el frontend la use
     res.json(genresArray);
 }));
 
-app.post('/vaciar-playlist', (req, res) => apiWrapper(req, res, async () => {
+app.post('/vaciar-playlist', standardApiWrapper(async (req, res) => {
     const { playlistId } = req.body;
     if (!playlistId) throw { statusCode: 400, message: 'Falta playlistId' };
 
     let tracksToRemove = [];
     let offset = 0;
-    // 1. Obtener todas las canciones de la playlist
+    
     while (true) {
         const data = await spotifyApi.getPlaylistTracks(playlistId, { offset, limit: 100 });
         data.body.items.forEach(item => {
@@ -832,20 +819,21 @@ app.post('/vaciar-playlist', (req, res) => apiWrapper(req, res, async () => {
 }));
 
 // ----------------------------------------
-// --- Endpoint PRINCIPAL: /filtrar-y-anadir (OPTIMIZADO) ---
+// --- Endpoint PRINCIPAL: /filtrar-y-anadir (AJUSTADO) ---
 // ----------------------------------------
 
-app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
+app.post('/filtrar-y-anadir', standardApiWrapper(async (req, res) => {
     const { generos, playlistId, excludedArtists = [] } = req.body;
-    if (!generos || !playlistId) throw { statusCode: 400, message: 'Faltan datos' };
+    const userId = req.cookies?.spotify_user_id; // 🛑 Usamos solo la cookie
+    if (!generos || !playlistId || !userId) throw { statusCode: 400, message: 'Faltan datos' };
 
     const addedTracksDetails = [];
     let existingTracksCount = 0;
-    const errors = []; // 💡 NUEVO: Array para errores descriptivos
+    const errors = []; 
 
     // 1. Obtener artistas seguidos y favoritos que coincidan con los géneros
     const artistIds = new Set(); 
-    const userConfig = getUserConfig(req.cookies?.spotify_user_id || currentUserId);
+    const userConfig = getUserConfig(userId); // 🛑 Usamos userId de la cookie
     
     // A. Artistas que SIGUES en Spotify
     let after = null;
@@ -890,18 +878,20 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
     }
     existingTracksCount = existingTracks.size;
     
-    // 💡 CAMBIO: Límite de 90 días
+    // 💡 Límite de 90 días
     const thisWeek = Date.now() - 90 * 24 * 3600 * 1000; 
     const trackUris = new Set();
-    const tracksToDetail = []; // 💡 NUEVO: Array para IDs de tracks que necesitan detalles
+    const tracksToDetail = []; 
 
     // 3. Buscar lanzamientos recientes de los artistas seleccionados
     for (const id of uniqueArtistIds) { 
       // Buscamos el nombre del artista para el manejo de errores
-      const artist = userConfig.favoriteArtists.find(a => a.id === id) || { name: `ID: ${id}` };
+      // Mejoramos la búsqueda: busca en los favoritos O usa el ID
+      const artist = userConfig.favoriteArtists.find(a => a.id === id) || 
+                     userConfig.favoriteArtists.find(a => a.id === id) || 
+                     { name: `ID: ${id}` };
 
       try {
-        // 💡 CAMBIO: Límite de 50 lanzamientos por artista
         const releases = await spotifyApi.getArtistAlbums(id, { limit: 50, include_groups: 'single,album' });
         
         for (const album of releases.body.items) {
@@ -914,7 +904,6 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
             for (const t of tracks.body.items) {
               if (t.uri && !existingTracks.has(t.uri)) {
                 
-                // 💡 OPTIMIZACIÓN: Solo guardamos el ID para obtener detalles después
                 tracksToDetail.push(t.id);
                 trackUris.add(t.uri); 
               }
@@ -922,7 +911,6 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
           }
         }
       } catch (e) {
-        // 💡 NUEVO: Registro de error descriptivo
         errors.push({
             artistId: id,
             artistName: artist.name,
@@ -935,7 +923,7 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
     }
     
     // -----------------------------------------------------
-    // 💡 OPTIMIZACIÓN: Procesar los detalles de las canciones en lote (50 en 50)
+    // OPTIMIZACIÓN: Procesar los detalles de las canciones en lote (50 en 50)
     // -----------------------------------------------------
     const detailBatchSize = 50;
     const allTrackIds = Array.from(tracksToDetail);
@@ -944,7 +932,6 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
         const batchIds = allTrackIds.slice(i, i + detailBatchSize);
         
         try {
-            // 🚨 Única llamada para 50 tracks
             const detailData = await spotifyApi.getTracks(batchIds); 
             
             detailData.body.tracks.forEach(fullTrack => {
@@ -954,7 +941,6 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
                     
                     const externalLinks = findExternalLinks(fullTrack.name, trackArtists, isrc);
 
-                    // Añadir a los detalles finales
                     addedTracksDetails.push({
                         title: fullTrack.name,
                         artist: trackArtists,
@@ -1003,7 +989,6 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
         newTracks: addedTracksDetails
     });
     
-    // 💡 NUEVO: Devolver los errores
     res.json({ 
       success: true, 
       message: `✅ Añadidas ${addedCount} canciones nuevas (${existingTracksCount} ya existían).`,
@@ -1013,13 +998,13 @@ app.post('/filtrar-y-anadir', (req, res) => apiWrapper(req, res, async () => {
 
 
 // ----------------------------------------
-// --- Endpoints de Artistas Filtrados/Excluidos ---
+// --- Endpoints de Artistas Filtrados/Excluidos (AJUSTADOS) ---
 // ----------------------------------------
-// ... (El código de /artistas-filtrados y /excluir-artista no ha sido modificado, se mantiene igual)
 
-app.post('/artistas-filtrados', (req, res) => apiWrapper(req, res, async () => {
+app.post('/artistas-filtrados', standardApiWrapper(async (req, res) => {
     const { generos } = req.body;
-    if (!generos) throw { statusCode: 400, message: 'Faltan generos' };
+    const userId = req.cookies?.spotify_user_id;
+    if (!generos || !userId) throw { statusCode: 400, message: 'Faltan datos' };
 
     const uniqueArtistIds = new Set();
     const allArtists = [];
@@ -1044,7 +1029,7 @@ app.post('/artistas-filtrados', (req, res) => apiWrapper(req, res, async () => {
     }
 
     // 2. Incluir Artistas Favoritos (lista interna de la app)
-    const userConfig = getUserConfig(req.cookies?.spotify_user_id || currentUserId);
+    const userConfig = getUserConfig(userId); // 🛑 Usamos userId de la cookie
     if (userConfig.favoriteArtists) {
         userConfig.favoriteArtists.forEach(a => {
             if (!uniqueArtistIds.has(a.id)) {
@@ -1057,12 +1042,11 @@ app.post('/artistas-filtrados', (req, res) => apiWrapper(req, res, async () => {
     res.json(allArtists);
 }));
 
-app.post('/excluir-artista', (req, res) => apiWrapper(req, res, async () => {
-    const userId = req.cookies?.spotify_user_id || currentUserId;
+app.post('/excluir-artista', standardApiWrapper(async (req, res) => {
+    const userId = req.cookies?.spotify_user_id; // 🛑 Usamos solo la cookie
     const { artistId, playlistId } = req.body;
     if (!userId || !artistId || !playlistId) throw { statusCode: 400, message: 'Faltan datos' };
 
-    currentUserId = userId;
     const config = getUserConfig(userId);
 
     // 1. Añadir el artista a la lista de excluidos
@@ -1101,20 +1085,18 @@ app.post('/excluir-artista', (req, res) => apiWrapper(req, res, async () => {
 }));
 
 // ----------------------------------------
-// --- Endpoints de Gestión de Playlists ---
+// --- Endpoints de Gestión de Playlists (AJUSTADOS) ---
 // ----------------------------------------
 
 // A. Endpoint para Listar Playlists del Usuario
-app.get('/user-playlists', (req, res) => apiWrapper(req, res, async () => {
-    const targetUserId = req.cookies?.spotify_user_id || currentUserId;
+app.get('/user-playlists', standardApiWrapper(async (req, res) => {
+    const targetUserId = req.cookies?.spotify_user_id; // 🛑 Usamos solo la cookie
     if (!targetUserId) throw { statusCode: 401, message: 'No hay ID de usuario para obtener playlists.' };
 
     let playlists = [];
     let offset = 0;
     
-    // Paginación para obtener hasta 100 playlists (50 por llamada)
     while (true) {
-        // Obtenemos solo las playlists donde el usuario es dueño o colaborador (por defecto)
         const data = await spotifyApi.getUserPlaylists(targetUserId, { limit: 50, offset });
         
         const items = data.body.items.map(p => ({
@@ -1122,28 +1104,25 @@ app.get('/user-playlists', (req, res) => apiWrapper(req, res, async () => {
             name: p.name,
             ownerId: p.owner.id,
             owner: p.owner.display_name,
-            collaborative: p.collaborative // Para mostrar si es de otro usuario
+            collaborative: p.collaborative 
         }));
         playlists = playlists.concat(items);
         
         if (!data.body.next) break;
         offset += 50;
     }
-    // Devolvemos la lista completa de playlists
     return res.json(playlists);
 }));
 
 // B. Endpoint para Crear una Nueva Playlist
-app.post('/create-playlist', (req, res) => apiWrapper(req, res, async () => {
+app.post('/create-playlist', standardApiWrapper(async (req, res) => {
     const { name } = req.body;
-    // targetUserId no es necesario para la llamada, pero lo mantengo para validación si quieres
-    const targetUserId = req.cookies?.spotify_user_id || currentUserId; 
+    const targetUserId = req.cookies?.spotify_user_id; 
     
     if (!name) throw { statusCode: 400, message: 'Se requiere el nombre de la playlist.' };
-    // Mantenemos esta validación si quieres, aunque la API de Spotify la manejaría
     if (!targetUserId) throw { statusCode: 401, message: 'No hay ID de usuario para crear playlist.' };
     
-    // 💡 CAMBIO CLAVE: Eliminar targetUserId como primer argumento
+    // El SDK de Spotify usa el token del usuario autenticado para crear la playlist.
     const data = await spotifyApi.createPlaylist(name, {
         'public': false, 
         'description': 'Playlist generada automáticamente por FilterFlow.'
@@ -1152,14 +1131,13 @@ app.post('/create-playlist', (req, res) => apiWrapper(req, res, async () => {
     const newPlaylist = {
         id: data.body.id,
         name: data.body.name,
-        // El API de Spotify no devuelve el ownerId, pero podemos usar el targetUserId
         ownerId: targetUserId 
     };
     return res.json({ success: true, playlist: newPlaylist, message: `Playlist ${name} creada.` });
 }));
 
 // ----------------------------------------
-// --- Inicio del Servidor ---
+// --- Inicio del Servidor (SIN CAMBIOS) ---
 // ----------------------------------------
 const port = process.env.PORT || 8888;
 const host = process.env.HOST || '0.0.0.0';
